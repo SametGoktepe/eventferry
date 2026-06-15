@@ -5,6 +5,7 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/SametGoktepe/eventferry/actions/workflows/ci.yml"><img src="https://github.com/SametGoktepe/eventferry/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
   <a href="https://www.npmjs.com/package/@eventferry/core"><img src="https://img.shields.io/npm/v/@eventferry/core.svg" alt="npm version"></a>
   <a href="https://www.npmjs.com/package/@eventferry/core"><img src="https://img.shields.io/npm/dm/@eventferry/core.svg" alt="npm downloads"></a>
   <img src="https://img.shields.io/badge/core%20deps-0-brightgreen.svg" alt="zero core dependencies">
