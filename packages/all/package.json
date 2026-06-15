@@ -36,6 +36,9 @@
   },
   "homepage": "https://github.com/SametGoktepe/eventferry/tree/main/packages/all#readme",
   "bugs": "https://github.com/SametGoktepe/eventferry/issues",
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
     "@eventferry/core": "workspace:*",
     "@eventferry/postgres": "workspace:*",

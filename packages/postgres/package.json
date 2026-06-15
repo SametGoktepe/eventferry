@@ -42,6 +42,9 @@
   },
   "homepage": "https://github.com/SametGoktepe/eventferry/tree/main/packages/postgres#readme",
   "bugs": "https://github.com/SametGoktepe/eventferry/issues",
+  "engines": {
+    "node": ">=18"
+  },
   "peerDependencies": {
     "@eventferry/core": "workspace:*",
     "pg": "^8.0.0",

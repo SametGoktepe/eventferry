@@ -37,6 +37,9 @@
   },
   "homepage": "https://github.com/SametGoktepe/eventferry/tree/main/packages/kafka#readme",
   "bugs": "https://github.com/SametGoktepe/eventferry/issues",
+  "engines": {
+    "node": ">=18"
+  },
   "peerDependencies": {
     "@eventferry/core": "workspace:*",
     "kafkajs": "^2.0.0",
