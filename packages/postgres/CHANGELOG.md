@@ -1,5 +1,13 @@
 # @eventferry/postgres
 
+## 1.0.2
+
+### Patch Changes
+
+- 89f1867: Declare `engines.node` (>=18) so npm shows the supported Node version and tooling can warn on unsupported runtimes.
+- Updated dependencies [89f1867]
+  - @eventferry/core@1.0.2
+
 ## 1.0.1
 
 ### Patch Changes
