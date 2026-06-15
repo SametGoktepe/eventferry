@@ -10,7 +10,7 @@
   <a href="https://www.npmjs.com/package/@eventferry/core"><img src="https://img.shields.io/npm/dm/@eventferry/core.svg" alt="npm downloads"></a>
   <img src="https://img.shields.io/badge/core%20deps-0-brightgreen.svg" alt="zero core dependencies">
   <img src="https://img.shields.io/badge/types-included-blue.svg" alt="types included">
-  <a href="./LICENSE"><img src="https://img.shields.io/npm/l/@eventferry/core.svg" alt="MIT license"></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT license"></a>
   <img src="https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg" alt="node >=18">
 </p>
 
