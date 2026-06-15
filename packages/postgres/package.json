@@ -1,6 +1,6 @@
 {
   "name": "@eventferry/postgres",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "PostgreSQL store for @eventferry (polling + lock-free claim)",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -18,22 +18,39 @@
       "require": "./dist/migrations.cjs"
     }
   },
-  "files": ["dist", "sql"],
+  "files": [
+    "dist",
+    "sql"
+  ],
   "scripts": {
     "build": "tsup",
     "test": "vitest",
     "test:run": "vitest run",
     "typecheck": "tsc --noEmit"
   },
-  "keywords": ["outbox", "postgres", "transactional-outbox", "skip-locked"],
+  "keywords": [
+    "outbox",
+    "postgres",
+    "transactional-outbox",
+    "skip-locked"
+  ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SametGoktepe/eventferry.git",
+    "directory": "packages/postgres"
+  },
+  "homepage": "https://github.com/SametGoktepe/eventferry/tree/main/packages/postgres#readme",
+  "bugs": "https://github.com/SametGoktepe/eventferry/issues",
   "peerDependencies": {
     "@eventferry/core": "workspace:*",
     "pg": "^8.0.0",
     "pg-logical-replication": "^2.0.0"
   },
   "peerDependenciesMeta": {
-    "pg-logical-replication": { "optional": true }
+    "pg-logical-replication": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@eventferry/core": "workspace:*",
