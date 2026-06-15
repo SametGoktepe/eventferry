@@ -11,7 +11,7 @@
   <img src="https://img.shields.io/badge/core%20deps-0-brightgreen.svg" alt="zero core dependencies">
   <img src="https://img.shields.io/badge/types-included-blue.svg" alt="types included">
   <a href="./LICENSE"><img src="https://img.shields.io/npm/l/@eventferry/core.svg" alt="MIT license"></a>
-  <img src="https://img.shields.io/node/v/@eventferry/core.svg" alt="node version">
+  <img src="https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg" alt="node >=18">
 </p>
 
 ```
