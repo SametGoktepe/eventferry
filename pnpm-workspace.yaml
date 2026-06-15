@@ -1,15 +1,13 @@
 packages:
   - "packages/*"
 
+# pnpm 11 build-script policy (replaces onlyBuiltDependencies/ignoredBuiltDependencies).
+# Every dependency with a lifecycle/postinstall script must be explicitly allowed
+# (true = run its build) or disallowed (false); otherwise a fresh `--frozen-lockfile`
+# install fails in CI (strictDepBuilds defaults to true).
 allowBuilds:
-  '@confluentinc/kafka-javascript': set this to true or false
-  cpu-features: set this to true or false
-  esbuild: set this to true or false
-  protobufjs: set this to true or false
-  ssh2: set this to true or false
-
-# Packages allowed to run install/build scripts (pnpm blocks them by default).
-# esbuild is pulled in by tsup/vitest; the confluent client compiles librdkafka.
-onlyBuiltDependencies:
-  - esbuild
-  - "@confluentinc/kafka-javascript"
+  esbuild: true # used by tsup + vitest
+  "@confluentinc/kafka-javascript": false # optional Kafka driver; tests use kafkajs
+  cpu-features: false # optional native speedup for ssh2; not needed
+  protobufjs: false # postinstall not needed
+  ssh2: false # testcontainers uses the Docker socket, not SSH
