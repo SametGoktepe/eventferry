@@ -1,0 +1,44 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+# Avoid overlapping release runs on rapid pushes.
+concurrency: release-${{ github.ref }}
+
+permissions:
+  contents: write # push the version-bump commit / create the "Version Packages" PR
+  pull-requests: write # open the "Version Packages" PR
+  id-token: write # OIDC trusted publishing + npm provenance (no NPM_TOKEN needed)
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: "https://registry.npmjs.org"
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm test:run # unit tests gate the publish (integration runs in ci.yml)
+
+      # Two-phase Changesets flow:
+      #  • If changesets exist  → opens/updates a "Version Packages" PR (bumps + CHANGELOGs).
+      #  • If versions are already bumped (that PR merged, no changesets left)
+      #    → publishes the new versions to npm via OIDC Trusted Publishing,
+      #    with build provenance. pnpm converts workspace:* to real versions.
+      - name: Version packages or publish to npm
+        uses: changesets/action@v1
+        with:
+          version: pnpm changeset version
+          publish: pnpm changeset publish
+          commit: "chore: version packages"
+          title: "chore: version packages"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_CONFIG_PROVENANCE: "true"
