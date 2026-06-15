@@ -1,5 +1,11 @@
 # @eventferry/core
 
+## 1.0.3
+
+### Patch Changes
+
+- aaca9a2: docs: use a non-expiring `2026-present` copyright year in LICENSE and a static MIT license badge in the README
+
 ## 1.0.2
 
 ### Patch Changes

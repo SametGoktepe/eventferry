@@ -1,6 +1,6 @@
 {
   "name": "@eventferry/integration",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "private": true,
   "description": "Integration tests for eventferry against real Postgres + Redpanda (Testcontainers)",
   "type": "module",
