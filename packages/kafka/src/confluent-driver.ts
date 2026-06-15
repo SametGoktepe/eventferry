@@ -1,0 +1,147 @@
+import type { PublishableMessage, PublishResult } from "@eventferry/core";
+import type {
+  KafkaConnectionConfig,
+  KafkaDriver,
+  ProducerBehaviorConfig,
+} from "./driver.js";
+
+// Structural typing of the confluent KafkaJS-compatible API surface so this
+// file compiles without the optional native dep installed.
+interface CkProducer {
+  connect(): Promise<void>;
+  disconnect(): Promise<void>;
+  send(args: unknown): Promise<unknown>;
+  transaction(): Promise<CkTransaction>;
+}
+interface CkTransaction {
+  send(args: unknown): Promise<unknown>;
+  commit(): Promise<void>;
+  abort(): Promise<void>;
+}
+interface CkKafka {
+  producer(args?: unknown): CkProducer;
+}
+
+export interface ConfluentDriverOptions
+  extends KafkaConnectionConfig,
+    ProducerBehaviorConfig {}
+
+/**
+ * Driver backed by `@confluentinc/kafka-javascript` (librdkafka wrapper).
+ * Higher throughput; uses the KafkaJS-compatible promisified API so the
+ * adapter mirrors the kafkajs driver closely.
+ */
+export class ConfluentDriver implements KafkaDriver {
+  readonly transactional: boolean;
+  private producer: CkProducer | null = null;
+  private readonly opts: ConfluentDriverOptions;
+
+  constructor(opts: ConfluentDriverOptions) {
+    this.opts = opts;
+    this.transactional = opts.transactional ?? false;
+    if (this.transactional && !opts.transactionalId) {
+      throw new Error(
+        "ConfluentDriver: transactionalId is required when transactional=true",
+      );
+    }
+  }
+
+  async connect(): Promise<void> {
+    this.producer = await this.createProducer();
+    await this.producer.connect();
+  }
+
+  /**
+   * Construct the underlying confluent producer. Overridable as a test seam so
+   * the send/transaction logic can be exercised without a real broker.
+   */
+  protected async createProducer(): Promise<CkProducer> {
+    const mod = await importConfluent();
+    const kafka: CkKafka = new mod.KafkaJS.Kafka({
+      kafkaJS: {
+        clientId: this.opts.clientId ?? "eventferry",
+        brokers: this.opts.brokers,
+        ssl: this.opts.ssl,
+        sasl: this.opts.sasl,
+      },
+    });
+    return kafka.producer({
+      kafkaJS: {
+        idempotent: this.opts.idempotent ?? true,
+        ...(this.transactional
+          ? { transactionalId: this.opts.transactionalId }
+          : {}),
+      },
+    });
+  }
+
+  async disconnect(): Promise<void> {
+    await this.producer?.disconnect();
+    this.producer = null;
+  }
+
+  async sendBatch(messages: PublishableMessage[]): Promise<PublishResult[]> {
+    if (!this.producer) throw new Error("ConfluentDriver not connected");
+    const topicMessages = groupByTopic(messages);
+    const acks = this.opts.acks ?? -1;
+    const compression = this.opts.compression;
+
+    const doSends = async (target: CkProducer | CkTransaction) => {
+      for (const tm of topicMessages) {
+        await target.send({
+          topic: tm.topic,
+          messages: tm.messages,
+          acks,
+          ...(compression && compression !== "none" ? { compression } : {}),
+        });
+      }
+    };
+
+    if (this.transactional) {
+      const txn = await this.producer.transaction();
+      try {
+        await doSends(txn);
+        await txn.commit();
+        return messages.map((m) => ({ recordId: m.recordId, ok: true }));
+      } catch (err) {
+        await txn.abort().catch(() => undefined);
+        const error = err instanceof Error ? err : new Error(String(err));
+        return messages.map((m) => ({ recordId: m.recordId, ok: false, error }));
+      }
+    }
+
+    try {
+      await doSends(this.producer);
+      return messages.map((m) => ({ recordId: m.recordId, ok: true }));
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      return messages.map((m) => ({ recordId: m.recordId, ok: false, error }));
+    }
+  }
+}
+
+function groupByTopic(messages: PublishableMessage[]) {
+  const byTopic = new Map<string, unknown[]>();
+  for (const m of messages) {
+    const arr = byTopic.get(m.topic) ?? [];
+    arr.push({ key: m.key, value: m.value, headers: m.headers });
+    byTopic.set(m.topic, arr);
+  }
+  return [...byTopic.entries()].map(([topic, msgs]) => ({
+    topic,
+    messages: msgs,
+  }));
+}
+
+async function importConfluent(): Promise<{
+  KafkaJS: { Kafka: new (cfg: unknown) => CkKafka };
+}> {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (await import("@confluentinc/kafka-javascript")) as any;
+  } catch {
+    throw new Error(
+      'Driver "confluent" selected but "@confluentinc/kafka-javascript" is not installed. Run: npm i @confluentinc/kafka-javascript',
+    );
+  }
+}

@@ -1,0 +1,46 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+.turbo/
+*.tsbuildinfo
+
+# Test / coverage
+coverage/
+
+# Packaged tarballs (npm/pnpm pack)
+*.tgz
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+*.pid
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Internal design docs & local agent config (not published)
+docs/
+.claude/
+
+# Editors
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Misc scratch
+*.bak
+*.tmp
+*.cache

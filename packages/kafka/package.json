@@ -1,0 +1,41 @@
+{
+  "name": "@eventferry/kafka",
+  "version": "0.1.0",
+  "description": "Kafka/Redpanda publisher for @eventferry (kafkajs + confluent drivers)",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": ["outbox", "kafka", "redpanda", "kafkajs", "confluent"],
+  "license": "MIT",
+  "peerDependencies": {
+    "@eventferry/core": "workspace:*",
+    "kafkajs": "^2.0.0",
+    "@confluentinc/kafka-javascript": "^1.0.0"
+  },
+  "peerDependenciesMeta": {
+    "kafkajs": { "optional": true },
+    "@confluentinc/kafka-javascript": { "optional": true }
+  },
+  "devDependencies": {
+    "@eventferry/core": "workspace:*",
+    "kafkajs": "^2.2.4",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

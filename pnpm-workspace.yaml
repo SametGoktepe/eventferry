@@ -1,0 +1,15 @@
+packages:
+  - "packages/*"
+
+allowBuilds:
+  '@confluentinc/kafka-javascript': set this to true or false
+  cpu-features: set this to true or false
+  esbuild: set this to true or false
+  protobufjs: set this to true or false
+  ssh2: set this to true or false
+
+# Packages allowed to run install/build scripts (pnpm blocks them by default).
+# esbuild is pulled in by tsup/vitest; the confluent client compiles librdkafka.
+onlyBuiltDependencies:
+  - esbuild
+  - "@confluentinc/kafka-javascript"

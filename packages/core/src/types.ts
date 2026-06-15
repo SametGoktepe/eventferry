@@ -1,0 +1,215 @@
+/**
+ * Status lifecycle of an outbox record.
+ *
+ * pending     -> freshly enqueued, awaiting first publish
+ * processing  -> claimed by a relay instance, publish in flight
+ * done        -> successfully published to the broker
+ * failed      -> publish failed, awaiting retry (next_retry_at)
+ * dead        -> exhausted retries, routed to DLQ (or parked)
+ */
+export type OutboxStatus = "pending" | "processing" | "done" | "failed" | "dead";
+
+export const OUTBOX_STATUS_CODE: Record<OutboxStatus, number> = {
+  pending: 0,
+  processing: 1,
+  done: 2,
+  failed: 3,
+  dead: 4,
+};
+
+export const OUTBOX_STATUS_FROM_CODE: Record<number, OutboxStatus> = {
+  0: "pending",
+  1: "processing",
+  2: "done",
+  3: "failed",
+  4: "dead",
+};
+
+/**
+ * A message as enqueued by the application inside its own DB transaction.
+ * This is the write-side input — no infra concerns leak in here.
+ */
+export interface OutboxMessageInput {
+  /** Logical topic the message will be published to. */
+  topic: string;
+  /** Type of the aggregate that produced this event (e.g. "order"). */
+  aggregateType: string;
+  /**
+   * Identifier of the aggregate instance (e.g. order id).
+   * Used as the default partition key to preserve per-aggregate ordering.
+   */
+  aggregateId: string;
+  /** Event payload. Serialized by the configured serializer. */
+  payload: unknown;
+  /** Optional explicit partition key. Falls back to aggregateId. */
+  key?: string;
+  /** Optional message headers. */
+  headers?: Record<string, string>;
+  /**
+   * Optional client-supplied message id for idempotency / dedup.
+   * If omitted, the store generates one.
+   */
+  messageId?: string;
+}
+
+/**
+ * A persisted outbox record as read back by the relay.
+ */
+export interface OutboxRecord {
+  id: string;
+  messageId: string;
+  topic: string;
+  aggregateType: string;
+  aggregateId: string;
+  key: string | null;
+  payload: unknown;
+  headers: Record<string, string>;
+  traceId: string | null;
+  status: OutboxStatus;
+  attempts: number;
+  nextRetryAt: Date | null;
+  createdAt: Date;
+  processedAt: Date | null;
+}
+
+/**
+ * The message handed to a Publisher after serialization.
+ */
+export interface PublishableMessage {
+  topic: string;
+  key: string | null;
+  /** Serialized payload bytes. */
+  value: Buffer;
+  headers: Record<string, string>;
+  /** Original record id, for correlation in publish results. */
+  recordId: string;
+  messageId: string;
+}
+
+/**
+ * Result of attempting to publish a single message.
+ */
+export interface PublishResult {
+  recordId: string;
+  ok: boolean;
+  error?: Error;
+}
+
+/**
+ * Pluggable serializer. Default is JSON; users can swap in
+ * Avro / Protobuf / Schema-Registry-backed serializers.
+ */
+export interface Serializer {
+  serialize(message: OutboxRecord): Buffer | Promise<Buffer>;
+  /** Content-type header value advertised for this serializer. */
+  readonly contentType: string;
+}
+
+/**
+ * Storage abstraction. Implemented per-database (postgres, mysql, ...).
+ * The relay only talks to the store through this interface.
+ */
+export interface OutboxStore {
+  /**
+   * Atomically claim up to `batchSize` due messages and mark them
+   * as `processing`. Implementations MUST be safe under concurrent
+   * relay instances (e.g. SELECT ... FOR UPDATE SKIP LOCKED).
+   */
+  claimBatch(batchSize: number): Promise<OutboxRecord[]>;
+
+  /** Mark records as successfully published. */
+  markDone(recordIds: string[]): Promise<void>;
+
+  /**
+   * Mark a record as failed and schedule its next retry.
+   * `nextRetryAt` of null + status "dead" means terminal.
+   */
+  markFailed(
+    recordId: string,
+    nextRetryAt: Date | null,
+    status: "failed" | "dead",
+  ): Promise<void>;
+
+  /** Best-effort lifecycle hooks; no-op allowed. */
+  init?(): Promise<void>;
+  close?(): Promise<void>;
+}
+
+/**
+ * Broker abstraction. Implemented per-driver (kafkajs, confluent, ...).
+ */
+export interface Publisher {
+  connect(): Promise<void>;
+  disconnect(): Promise<void>;
+  /**
+   * Publish a batch. Returns a per-message result so the relay can
+   * mark partial success. Implementations may use a transactional
+   * producer to make the batch atomic.
+   */
+  publish(messages: PublishableMessage[]): Promise<PublishResult[]>;
+  /** Route a permanently-failed message to a dead-letter destination. */
+  publishToDlq?(message: PublishableMessage, error: Error): Promise<void>;
+}
+
+/**
+ * Backoff strategy for retrying failed publishes.
+ */
+export type BackoffStrategy = "fixed" | "linear" | "exponential";
+
+export interface RetryConfig {
+  maxAttempts: number;
+  strategy: BackoffStrategy;
+  baseMs: number;
+  maxMs: number;
+  /** Add random jitter (0..baseMs) to avoid thundering herd. Default true. */
+  jitter?: boolean;
+}
+
+export interface DlqConfig {
+  /** Topic to route dead messages to. If absent, dead messages are parked. */
+  topic?: string;
+}
+
+/**
+ * Optional trace-context propagator. `inject` writes the active trace context
+ * into the carrier as W3C `traceparent`/`tracestate` (the shape of an
+ * OpenTelemetry TextMapPropagator), so it is persisted with the outbox row and
+ * carried to the published message. The library depends on no tracing package;
+ * provide a thin adapter over yours (OpenTelemetry, Datadog, …).
+ */
+export interface Tracing {
+  inject(carrier: Record<string, string>): void;
+}
+
+/**
+ * Minimal structured logger. Console-backed default provided.
+ */
+export interface Logger {
+  debug(msg: string, meta?: Record<string, unknown>): void;
+  info(msg: string, meta?: Record<string, unknown>): void;
+  warn(msg: string, meta?: Record<string, unknown>): void;
+  error(msg: string, meta?: Record<string, unknown>): void;
+}
+
+/**
+ * A low-latency wake source for the relay. Instead of only waking on the poll
+ * interval, the relay claims immediately whenever `onWake` fires. The signal is
+ * advisory: it may fire spuriously or be missed entirely, and the relay's
+ * polling remains the safety net, so implementations need not deduplicate or
+ * guarantee delivery. (e.g. a Postgres LISTEN/NOTIFY waker.)
+ */
+export interface Waker {
+  start(onWake: () => void): Promise<void>;
+  stop(): Promise<void>;
+}
+
+/**
+ * Lifecycle / observability hooks emitted by the relay.
+ */
+export interface RelayHooks {
+  onBatchClaimed?(count: number): void;
+  onPublished?(result: PublishResult): void;
+  onFailed?(record: OutboxRecord, error: Error, willRetry: boolean): void;
+  onDead?(record: OutboxRecord, error: Error): void;
+  onError?(error: Error): void;
+}

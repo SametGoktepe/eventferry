@@ -1,0 +1,47 @@
+{
+  "name": "@eventferry/postgres",
+  "version": "0.1.0",
+  "description": "PostgreSQL store for @eventferry (polling + lock-free claim)",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./migrations": {
+      "types": "./dist/migrations.d.ts",
+      "import": "./dist/migrations.js",
+      "require": "./dist/migrations.cjs"
+    }
+  },
+  "files": ["dist", "sql"],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": ["outbox", "postgres", "transactional-outbox", "skip-locked"],
+  "license": "MIT",
+  "peerDependencies": {
+    "@eventferry/core": "workspace:*",
+    "pg": "^8.0.0",
+    "pg-logical-replication": "^2.0.0"
+  },
+  "peerDependenciesMeta": {
+    "pg-logical-replication": { "optional": true }
+  },
+  "devDependencies": {
+    "@eventferry/core": "workspace:*",
+    "@types/pg": "^8.11.10",
+    "pg": "^8.13.1",
+    "pg-logical-replication": "^2.0.0",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

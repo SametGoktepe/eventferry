@@ -1,0 +1,39 @@
+{
+  "name": "@eventferry/schema-registry",
+  "version": "0.1.0",
+  "description": "Confluent Schema Registry serializer for @eventferry (Avro/Protobuf/JSON Schema)",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": ["outbox", "schema-registry", "avro", "protobuf", "json-schema", "confluent"],
+  "license": "MIT",
+  "peerDependencies": {
+    "@eventferry/core": "workspace:*",
+    "@kafkajs/confluent-schema-registry": "^3.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@kafkajs/confluent-schema-registry": { "optional": true }
+  },
+  "devDependencies": {
+    "@eventferry/core": "workspace:*",
+    "@kafkajs/confluent-schema-registry": "^3.0.0",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
