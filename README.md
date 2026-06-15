@@ -338,6 +338,16 @@ await store.purgeDone({ olderThanMs: 7 * 24 * 60 * 60 * 1000 }); // older than 7
 | [`@eventferry/schema-registry`](./packages/schema-registry) | Confluent Schema Registry serializer (Avro / Protobuf / JSON Schema). |
 | [`@eventferry/all`](./packages/all) | Meta-package — installs & re-exports all of the above. `npm i @eventferry/all` for everything in one import. |
 
+## Roadmap
+
+eventferry is built around a small, database-agnostic `OutboxStore` contract, so
+every new database is just a new adapter. PostgreSQL ships today; **MySQL/MariaDB,
+SQL Server, and MongoDB are next**, with CockroachDB, SQLite, Oracle, and DynamoDB
+on the horizon.
+
+See **[ROADMAP.md](./ROADMAP.md)** for the full plan — architecture diagrams, the
+per-database capability matrix, and phase-by-phase checklists.
+
 ## Development
 
 ```bash
