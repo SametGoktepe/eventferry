@@ -1,5 +1,13 @@
 # @eventferry/schema-registry
 
+## 1.0.1
+
+### Patch Changes
+
+- docs: polish per-package READMEs (npm page content). No code changes.
+- Updated dependencies
+  - @eventferry/core@1.0.1
+
 ## 1.0.0
 
 ### Minor Changes
