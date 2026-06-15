@@ -117,8 +117,15 @@ idempotency, or crash recovery. eventferry is a complete, production-grade toolk
 
 ## Installation
 
-eventferry is a small set of focused packages. Install the core, a storage adapter, a
-broker adapter, and your chosen Kafka client:
+eventferry is a small set of focused packages. **For everything in one shot**, install
+the meta-package and your Kafka client:
+
+```bash
+npm i @eventferry/all pg kafkajs   # pulls in core + postgres + kafka + schema-registry
+```
+
+Or install only the pieces you use (smaller dependency tree) — the core, a storage
+adapter, a broker adapter, and your chosen Kafka client:
 
 ```bash
 # core engine + Postgres store + Kafka publisher + the pg driver
@@ -329,6 +336,7 @@ await store.purgeDone({ olderThanMs: 7 * 24 * 60 * 60 * 1000 }); // older than 7
 | [`@eventferry/postgres`](./packages/postgres) | PostgreSQL store, migration/trigger/publication SQL, notify waker, streaming relay, retention. |
 | [`@eventferry/kafka`](./packages/kafka) | Kafka/Redpanda publisher over `kafkajs` and `confluent` drivers, with DLQ routing. |
 | [`@eventferry/schema-registry`](./packages/schema-registry) | Confluent Schema Registry serializer (Avro / Protobuf / JSON Schema). |
+| [`@eventferry/all`](./packages/all) | Meta-package — installs & re-exports all of the above. `npm i @eventferry/all` for everything in one import. |
 
 ## Development
 

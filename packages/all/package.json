@@ -1,0 +1,33 @@
+{
+  "name": "@eventferry/all",
+  "version": "0.1.0",
+  "description": "Meta-package: installs and re-exports all of eventferry (core + postgres + kafka + schema-registry)",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": ["outbox", "transactional-outbox", "kafka", "redpanda", "postgres", "eventferry"],
+  "license": "MIT",
+  "dependencies": {
+    "@eventferry/core": "workspace:*",
+    "@eventferry/postgres": "workspace:*",
+    "@eventferry/kafka": "workspace:*",
+    "@eventferry/schema-registry": "workspace:*"
+  },
+  "devDependencies": {
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2"
+  }
+}
