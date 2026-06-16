@@ -1,7 +1,7 @@
 {
-  "name": "@eventferry/all",
+  "name": "@eventferry/mysql",
   "version": "1.0.4",
-  "description": "Meta-package: installs and re-exports all of eventferry (core + postgres + mysql + kafka + schema-registry)",
+  "description": "MySQL / MariaDB store for @eventferry (polling + SKIP LOCKED claim)",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -11,6 +11,11 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "require": "./dist/index.cjs"
+    },
+    "./migrations": {
+      "types": "./dist/migrations.d.ts",
+      "import": "./dist/migrations.js",
+      "require": "./dist/migrations.cjs"
     }
   },
   "files": [
@@ -18,53 +23,50 @@
   ],
   "scripts": {
     "build": "tsup",
+    "test": "vitest",
+    "test:run": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [
     "outbox",
     "outbox-pattern",
     "transactional-outbox",
-    "dual-write",
-    "event-driven",
-    "event-driven-architecture",
-    "event-publishing",
-    "cdc",
-    "change-data-capture",
-    "kafka",
-    "redpanda",
-    "postgres",
-    "postgresql",
     "mysql",
     "mariadb",
-    "schema-registry",
+    "mysql2",
+    "skip-locked",
+    "event-driven",
+    "event-publishing",
     "microservices",
-    "distributed-systems",
-    "reliable-messaging",
-    "at-least-once",
     "nodejs",
-    "typescript",
-    "eventferry"
+    "typescript"
   ],
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/SametGoktepe/eventferry.git",
-    "directory": "packages/all"
+    "directory": "packages/mysql"
   },
-  "homepage": "https://github.com/SametGoktepe/eventferry/tree/main/packages/all#readme",
+  "homepage": "https://github.com/SametGoktepe/eventferry/tree/main/packages/mysql#readme",
   "bugs": "https://github.com/SametGoktepe/eventferry/issues",
   "engines": {
     "node": ">=18"
   },
-  "dependencies": {
+  "peerDependencies": {
     "@eventferry/core": "workspace:*",
-    "@eventferry/postgres": "workspace:*",
-    "@eventferry/mysql": "workspace:*",
-    "@eventferry/kafka": "workspace:*",
-    "@eventferry/schema-registry": "workspace:*"
+    "mysql2": "^3.0.0",
+    "@vlasky/zongji": "^0.6.0"
+  },
+  "peerDependenciesMeta": {
+    "@vlasky/zongji": {
+      "optional": true
+    }
   },
   "devDependencies": {
+    "@eventferry/core": "workspace:*",
+    "mysql2": "^3.11.5",
     "tsup": "^8.3.5",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
   }
 }

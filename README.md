@@ -362,6 +362,7 @@ await store.purgeDone({ olderThanMs: 7 * 24 * 60 * 60 * 1000 }); // older than 7
 | --- | --- |
 | [`@eventferry/core`](./packages/core) | DB- and broker-agnostic engine: relay loop, backoff, serializer, typed registry. Zero runtime deps. |
 | [`@eventferry/postgres`](./packages/postgres) | PostgreSQL store, migration/trigger/publication SQL, notify waker, streaming relay, retention. |
+| [`@eventferry/mysql`](./packages/mysql) | MySQL 8.0.1+ / MariaDB 10.6+ store with SKIP LOCKED claim, strict per-aggregate ordering, and reaper. |
 | [`@eventferry/kafka`](./packages/kafka) | Kafka/Redpanda publisher over `kafkajs` and `confluent` drivers, with DLQ routing. |
 | [`@eventferry/schema-registry`](./packages/schema-registry) | Confluent Schema Registry serializer (Avro / Protobuf / JSON Schema). |
 | [`@eventferry/all`](./packages/all) | Meta-package — installs & re-exports all of the above. `npm i @eventferry/all` for everything in one import. |
@@ -403,9 +404,9 @@ Yes. eventferry ships with strict per-aggregate ordering, a crash-recovery reape
 ## Roadmap
 
 eventferry is built around a small, database-agnostic `OutboxStore` contract, so
-every new database is just a new adapter. PostgreSQL ships today; **MySQL/MariaDB,
-SQL Server, and MongoDB are next**, with CockroachDB, SQLite, Oracle, and DynamoDB
-on the horizon.
+every new database is just a new adapter. **PostgreSQL** and **MySQL / MariaDB**
+ship today; **SQL Server** and **MongoDB** are next, with CockroachDB, SQLite,
+Oracle, and DynamoDB on the horizon.
 
 See **[ROADMAP.md](./ROADMAP.md)** for the full plan — architecture diagrams, the
 per-database capability matrix, and phase-by-phase checklists.

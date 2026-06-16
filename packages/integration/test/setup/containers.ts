@@ -1,4 +1,8 @@
 import {
+  MySqlContainer,
+  type StartedMySqlContainer,
+} from "@testcontainers/mysql";
+import {
   PostgreSqlContainer,
   type StartedPostgreSqlContainer,
 } from "@testcontainers/postgresql";
@@ -8,6 +12,7 @@ import {
 } from "@testcontainers/redpanda";
 
 let pg: StartedPostgreSqlContainer | undefined;
+let mysql: StartedMySqlContainer | undefined;
 let redpanda: StartedRedpandaContainer | undefined;
 
 export async function setup(): Promise<void> {
@@ -26,16 +31,60 @@ export async function setup(): Promise<void> {
     ])
     .start();
 
+  mysql = await new MySqlContainer("mysql:8.0")
+    .withUsername("eventferry")
+    .withUserPassword("test")
+    .withRootPassword("test")
+    .withDatabase("eventferry")
+    // Row-based binlog is required for MysqlBinlogRelay. Drop the config into
+    // /etc/mysql/conf.d (read by the official mysql:8.0 image's entrypoint)
+    // instead of `.withCommand(...)`, which would clobber the image's default
+    // mysqld arg-set and break first-run initialisation.
+    .withCopyContentToContainer([
+      {
+        content: [
+          "[mysqld]",
+          "server-id=1",
+          "log-bin=mysql-bin",
+          "binlog-format=ROW",
+          "binlog-row-image=FULL",
+          "gtid-mode=ON",
+          "enforce-gtid-consistency=ON",
+          "",
+        ].join("\n"),
+        target: "/etc/mysql/conf.d/binlog.cnf",
+        mode: 0o644,
+      },
+      // Init script: grant REPLICATION privileges to the app user so the same
+      // user that the store uses can also drive the binlog relay. Runs once on
+      // first-boot (the image's docker-entrypoint processes *.sql here).
+      {
+        content:
+          "GRANT REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'eventferry'@'%';\nFLUSH PRIVILEGES;\n",
+        target: "/docker-entrypoint-initdb.d/01-replication-grants.sql",
+        mode: 0o644,
+      },
+    ])
+    // Cold MySQL 8 + binlog init can take a while on a fresh runner.
+    .withStartupTimeout(180_000)
+    .start();
+
   redpanda = await new RedpandaContainer(
     "redpandadata/redpanda:latest",
   ).start();
 
   process.env.PG_URL = pg.getConnectionUri();
+  process.env.MYSQL_HOST = mysql.getHost();
+  process.env.MYSQL_PORT = String(mysql.getPort());
+  process.env.MYSQL_USER = "eventferry";
+  process.env.MYSQL_PASSWORD = "test";
+  process.env.MYSQL_DATABASE = "eventferry";
   process.env.KAFKA_BROKERS = redpanda.getBootstrapServers();
   process.env.SCHEMA_REGISTRY_URL = redpanda.getSchemaRegistryAddress();
 }
 
 export async function teardown(): Promise<void> {
   await redpanda?.stop();
+  await mysql?.stop();
   await pg?.stop();
 }
