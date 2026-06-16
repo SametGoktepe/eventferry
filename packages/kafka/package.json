@@ -24,10 +24,22 @@
   },
   "keywords": [
     "outbox",
+    "outbox-pattern",
+    "transactional-outbox",
     "kafka",
     "redpanda",
     "kafkajs",
-    "confluent"
+    "confluent-kafka",
+    "confluent",
+    "librdkafka",
+    "dlq",
+    "dead-letter-queue",
+    "idempotent-producer",
+    "exactly-once",
+    "event-driven",
+    "event-publishing",
+    "nodejs",
+    "typescript"
   ],
   "license": "MIT",
   "repository": {

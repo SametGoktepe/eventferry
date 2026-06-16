@@ -30,9 +30,22 @@
   },
   "keywords": [
     "outbox",
-    "postgres",
+    "outbox-pattern",
     "transactional-outbox",
-    "skip-locked"
+    "postgres",
+    "postgresql",
+    "pg",
+    "skip-locked",
+    "listen-notify",
+    "logical-replication",
+    "wal",
+    "cdc",
+    "change-data-capture",
+    "event-driven",
+    "event-publishing",
+    "microservices",
+    "nodejs",
+    "typescript"
   ],
   "license": "MIT",
   "repository": {
