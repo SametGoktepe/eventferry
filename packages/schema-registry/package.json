@@ -1,6 +1,6 @@
 {
   "name": "@eventferry/schema-registry",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Confluent Schema Registry serializer for @eventferry (Avro/Protobuf/JSON Schema)",
   "type": "module",
   "main": "./dist/index.cjs",
