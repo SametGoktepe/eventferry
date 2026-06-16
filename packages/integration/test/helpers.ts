@@ -1,4 +1,5 @@
 import { Kafka } from "kafkajs";
+import mysql from "mysql2/promise";
 import { Pool } from "pg";
 
 export function pgUrl(): string {
@@ -9,6 +10,37 @@ export function pgUrl(): string {
 
 export function newPool(): Pool {
   return new Pool({ connectionString: pgUrl() });
+}
+
+export interface MysqlConnectionInfo {
+  host: string;
+  port: number;
+  user: string;
+  password: string;
+  database: string;
+}
+
+export function mysqlInfo(): MysqlConnectionInfo {
+  const host = process.env.MYSQL_HOST;
+  const port = process.env.MYSQL_PORT;
+  const user = process.env.MYSQL_USER;
+  const password = process.env.MYSQL_PASSWORD;
+  const database = process.env.MYSQL_DATABASE;
+  if (!host || !port || !user || !password || !database) {
+    throw new Error("MYSQL_* env vars not set (global setup did not run?)");
+  }
+  return { host, port: Number(port), user, password, database };
+}
+
+export function newMysqlPool(): mysql.Pool {
+  return mysql.createPool({
+    ...mysqlInfo(),
+    // BIGINT ids returned as strings so id comparisons are stable.
+    supportBigNumbers: true,
+    bigNumberStrings: true,
+    // Stable date handling for the reaper.
+    dateStrings: false,
+  });
 }
 
 export function brokers(): string[] {

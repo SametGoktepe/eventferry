@@ -66,6 +66,9 @@ importers:
       '@eventferry/kafka':
         specifier: workspace:*
         version: link:../kafka
+      '@eventferry/mysql':
+        specifier: workspace:*
+        version: link:../mysql
       '@eventferry/postgres':
         specifier: workspace:*
         version: link:../postgres
@@ -75,6 +78,9 @@ importers:
       '@kafkajs/confluent-schema-registry':
         specifier: ^3.0.0
         version: 3.9.0
+      '@testcontainers/mysql':
+        specifier: ^10.0.0
+        version: 10.28.0
       '@testcontainers/postgresql':
         specifier: ^10.0.0
         version: 10.28.0
@@ -87,9 +93,15 @@ importers:
       '@types/pg':
         specifier: ^8.11.10
         version: 8.20.0
+      '@vlasky/zongji':
+        specifier: ^0.6.0
+        version: 0.6.1(@types/node@22.19.21)
       kafkajs:
         specifier: ^2.2.4
         version: 2.2.4
+      mysql2:
+        specifier: ^3.11.5
+        version: 3.22.5(@types/node@22.19.21)
       pg:
         specifier: ^8.13.1
         version: 8.21.0
@@ -129,6 +141,10 @@ importers:
         version: 2.1.9(@types/node@22.19.21)
 
   packages/mysql:
+    dependencies:
+      '@vlasky/zongji':
+        specifier: ^0.6.0
+        version: 0.6.1(@types/node@22.19.21)
     devDependencies:
       '@eventferry/core':
         specifier: workspace:*
@@ -796,6 +812,9 @@ packages:
     cpu: [x64]
     os: [win32]
 
+  '@testcontainers/mysql@10.28.0':
+    resolution: {integrity: sha512-yZKe86Esg8mPyr957aSwdkmDqXH17vab5aUcDqwR/E2fZpZxLetwfvmoVP+V6TpQQNTYrVTyP5T+HPMgaZeIkA==}
+
   '@testcontainers/postgresql@10.28.0':
     resolution: {integrity: sha512-NN25rruG5D4Q7pCNIJuHwB+G85OSeJ3xHZ2fWx0O6sPoPEfCYwvpj8mq99cyn68nxFkFYZeyrZJtSFO+FnydiA==}
 
@@ -860,6 +879,10 @@ packages:
 
   '@vitest/utils@2.1.9':
     resolution: {integrity: sha512-v0psaMSkNJ3A2NMrUEHFRzJtDPFn+/VWZ5WxImB21T9fjucJRmS7xCS3ppEnARb9y11OAzaD+P2Ps+b+BGX5iQ==}
+
+  '@vlasky/zongji@0.6.1':
+    resolution: {integrity: sha512-803JbPT5sf1Dg6xse5VqoD1ju4S3ST7kJNaPApaFmPcoJSwzx//yM0AO7QaIHp54N+MJlZbZ7cc5ext4zC3o1g==}
+    engines: {node: '>= 18.0'}
 
   abbrev@3.0.1:
     resolution: {integrity: sha512-AO2ac6pjRB3SJmGJo+v5/aK6Omggp6fsLrs6wN9bd35ulu4cCwaAU9+7ZhXjeqHVkaHThLuzH0nZr0YpCDhygg==}
@@ -1004,6 +1027,10 @@ packages:
   better-path-resolve@1.0.0:
     resolution: {integrity: sha512-pbnl5XzGBdrFU/wT4jqmJVPn2B6UHPBOhzMQkY/SPUPB6QtUXtmBHBIwCbXJol93mOpGMnQyP/+BB19q04xj7g==}
     engines: {node: '>=4'}
+
+  big-integer@1.6.52:
+    resolution: {integrity: sha512-QxD8cf2eVqJOOz63z6JIN9BzvVs/dlySa5HGSBH5xtR8dPteIRQnBxxKqkNTiT6jbDTF6jAfrd4oMcND9RGbQg==}
+    engines: {node: '>=0.6'}
 
   bindings@1.5.0:
     resolution: {integrity: sha512-p2q/t/mhvuOj/UeLlV6566GD/guowlr0hHxClI0W9m7MWYkL1F0hLo+0Aexs9HSPCtR1SXQ0TD3MMKrXZajbiQ==}
@@ -2657,6 +2684,15 @@ snapshots:
   '@rollup/rollup-win32-x64-msvc@4.62.0':
     optional: true
 
+  '@testcontainers/mysql@10.28.0':
+    dependencies:
+      testcontainers: 10.28.0
+    transitivePeerDependencies:
+      - bare-abort-controller
+      - bare-buffer
+      - react-native-b4a
+      - supports-color
+
   '@testcontainers/postgresql@10.28.0':
     dependencies:
       testcontainers: 10.28.0
@@ -2757,6 +2793,14 @@ snapshots:
       '@vitest/pretty-format': 2.1.9
       loupe: 3.2.1
       tinyrainbow: 1.2.0
+
+  '@vlasky/zongji@0.6.1(@types/node@22.19.21)':
+    dependencies:
+      big-integer: 1.6.52
+      iconv-lite: 0.7.2
+      mysql2: 3.22.5(@types/node@22.19.21)
+    transitivePeerDependencies:
+      - '@types/node'
 
   abbrev@3.0.1: {}
 
@@ -2881,6 +2925,8 @@ snapshots:
   better-path-resolve@1.0.0:
     dependencies:
       is-windows: 1.0.2
+
+  big-integer@1.6.52: {}
 
   bindings@1.5.0:
     dependencies:
