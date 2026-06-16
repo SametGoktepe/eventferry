@@ -1,5 +1,7 @@
 # @eventferry/integration
 
+## 2.0.0
+
 ## 1.0.4
 
 ## 1.0.3

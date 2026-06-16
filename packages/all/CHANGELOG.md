@@ -1,5 +1,16 @@
 # @eventferry/all
 
+## 2.0.0
+
+### Patch Changes
+
+- Updated dependencies [0085bb1]
+  - @eventferry/mysql@2.0.0
+  - @eventferry/core@2.0.0
+  - @eventferry/kafka@2.0.0
+  - @eventferry/postgres@2.0.0
+  - @eventferry/schema-registry@2.0.0
+
 ## 1.0.4
 
 ### Patch Changes
