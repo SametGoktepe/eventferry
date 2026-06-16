@@ -24,11 +24,19 @@
   },
   "keywords": [
     "outbox",
+    "transactional-outbox",
     "schema-registry",
+    "confluent-schema-registry",
     "avro",
     "protobuf",
     "json-schema",
-    "confluent"
+    "confluent",
+    "kafka",
+    "serialization",
+    "schema-evolution",
+    "event-driven",
+    "nodejs",
+    "typescript"
   ],
   "license": "MIT",
   "repository": {

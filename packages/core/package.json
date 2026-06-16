@@ -24,11 +24,24 @@
   },
   "keywords": [
     "outbox",
+    "outbox-pattern",
     "transactional-outbox",
+    "dual-write",
+    "event-driven",
+    "event-driven-architecture",
+    "event-publishing",
+    "event-sourcing",
+    "cdc",
+    "change-data-capture",
     "kafka",
     "redpanda",
-    "event-driven",
-    "cdc"
+    "microservices",
+    "distributed-systems",
+    "reliable-messaging",
+    "at-least-once",
+    "eventual-consistency",
+    "nodejs",
+    "typescript"
   ],
   "license": "MIT",
   "repository": {

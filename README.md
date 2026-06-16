@@ -115,6 +115,34 @@ idempotency, or crash recovery. eventferry is a complete, production-grade toolk
 * **Not an ORM or migration tool** — you bring your own `pg` pool and migration runner; eventferry hands you the SQL to run.
 * **Not exactly-once end-to-end** — at-least-once by default (with an optional EOS producer for the broker hop). Make consumers idempotent.
 
+## When should I use eventferry?
+
+**Use eventferry when:**
+
+* You write to **PostgreSQL** and publish to **Kafka or Redpanda** in the same business operation, and you can't afford the database and broker to disagree.
+* You're building **microservices** with an **event-driven architecture** and need reliable event publishing without losing messages on crashes.
+* You need **strict per-aggregate ordering** (e.g. all events for `order:42` published in the order they happened) — even with many relays running.
+* You want **at-least-once delivery** with retries, backoff, jitter, and a dead-letter queue out of the box.
+* You want a **Node.js / TypeScript** library and a small, focused dependency tree — not a JVM-heavy CDC platform.
+* You need **CDC-style throughput** without operating Kafka Connect: eventferry can stream straight from Postgres WAL.
+
+**Don't use eventferry when:**
+
+* You only publish events from one service to itself — a plain in-process queue is simpler.
+* You don't have a transactional database write — there's no dual-write to solve.
+* You need exactly-once end-to-end semantics across consumers — that's an application-layer concern (make consumers idempotent).
+* You're already running **Debezium / Kafka Connect** at scale and it fits your operations — eventferry overlaps for the Postgres → Kafka path.
+
+## How does eventferry compare to alternatives?
+
+| Alternative | What it is | When eventferry is better |
+| --- | --- | --- |
+| **Debezium / Kafka Connect** | JVM-based CDC platform that tails the database log and publishes changes to Kafka. | You want a **Node.js library** instead of a JVM cluster, no Kafka Connect to operate, and a typed event registry instead of raw row-change events. eventferry can still use Postgres WAL streaming for similar throughput. |
+| **pg-boss / BullMQ** | Background job queues backed by Postgres or Redis. | These are *job queues*, not outboxes — they're not designed for atomic dual-write with your business transaction or for publishing to Kafka. Use them for jobs, use eventferry for events. |
+| **Custom outbox table** (DIY) | Hand-rolled outbox table + a cron / worker that polls and publishes. | You skip writing (and maintaining) the parts that are easy to get wrong: skip-locked claiming under concurrent relays, per-aggregate ordering, crash-recovery reaper, retry/backoff, DLQ routing, Schema Registry serialization, and CDC. |
+| **Publishing to Kafka after DB commit** (naive) | `await db.commit(); await kafka.send(...)`. | This is exactly the **dual-write problem** eventferry exists to solve: a crash between the two calls drops the event. |
+| **Transactional Kafka producer alone** | Kafka EOS without an outbox. | Doesn't help — your *database write* isn't inside the Kafka transaction. You still need an outbox to atomically persist the intent to publish. |
+
 ## Installation
 
 eventferry is a small set of focused packages. **For everything in one shot**, install
@@ -337,6 +365,40 @@ await store.purgeDone({ olderThanMs: 7 * 24 * 60 * 60 * 1000 }); // older than 7
 | [`@eventferry/kafka`](./packages/kafka) | Kafka/Redpanda publisher over `kafkajs` and `confluent` drivers, with DLQ routing. |
 | [`@eventferry/schema-registry`](./packages/schema-registry) | Confluent Schema Registry serializer (Avro / Protobuf / JSON Schema). |
 | [`@eventferry/all`](./packages/all) | Meta-package — installs & re-exports all of the above. `npm i @eventferry/all` for everything in one import. |
+
+## FAQ
+
+### Does eventferry work with Prisma, TypeORM, Drizzle, or Kysely?
+
+Yes. eventferry takes a `pg` pool / client; it doesn't replace your ORM. Pass the underlying `pg.Client` your ORM is using inside its transaction to `store.enqueue(client, ...)` — the event is written in the same transaction as your ORM's writes.
+
+### Why not just publish to Kafka after `db.commit()`?
+
+That's the **dual-write problem**: a crash, a network blip, or a Kafka outage between the commit and the publish drops the event silently. The database thinks the order was placed; downstream services never hear about it. The outbox pattern (and eventferry) closes that window by writing the *intent to publish* atomically with the business data.
+
+### How is this different from Debezium?
+
+Debezium is a JVM-based CDC platform that tails the database log and publishes row changes to Kafka via Kafka Connect. It's powerful but operationally heavy: you run a Connect cluster, your events are row-level (not domain-level), and integration with Node.js services is indirect. eventferry is a **Node.js library** with a typed event registry — you publish *domain events* you define, no Kafka Connect to operate. For high throughput, eventferry can stream directly from Postgres WAL just like Debezium does.
+
+### Does eventferry support exactly-once delivery?
+
+To the broker, yes — you can enable a transactional (EOS) producer so a batch lands atomically in Kafka. End-to-end exactly-once is impossible without idempotent consumers: design consumers to dedupe on `messageId`.
+
+### Can I use it with Redpanda instead of Kafka?
+
+Yes. Redpanda is wire-compatible with the Kafka protocol; both `kafkajs` and `@confluentinc/kafka-javascript` drivers work unchanged.
+
+### What about MySQL, SQL Server, or MongoDB?
+
+The relay is database-agnostic — only the `OutboxStore` adapter is per-database. PostgreSQL ships today; MySQL/MariaDB, SQL Server, and MongoDB are next on the [roadmap](./ROADMAP.md), followed by CockroachDB, SQLite, Oracle, and DynamoDB.
+
+### How much operational overhead does eventferry add?
+
+One database table (`outbox`), one background process (the relay — runs in your existing Node.js service, no extra deployment), and a periodic retention job. The relay is horizontally scalable: run N instances, lock-free claim guarantees no double-publish.
+
+### Is it production-ready?
+
+Yes. eventferry ships with strict per-aggregate ordering, a crash-recovery reaper, retries with backoff + jitter, DLQ routing, Schema Registry support, W3C trace propagation, and an integration test suite running against real PostgreSQL + Redpanda via Testcontainers. It is MIT-licensed and used in production.
 
 ## Roadmap
 
