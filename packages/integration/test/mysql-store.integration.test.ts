@@ -179,8 +179,11 @@ describe("MysqlStore against real MySQL 8", () => {
     const purged = await store.purgeDone({ olderThanMs: 60_000, batchSize: 100 });
     expect(purged).toBe(1);
 
-    // The other row (still pending) is untouched.
+    // The other row (still pending) is untouched. mysql2's BIGINT-as-string
+    // mode (enabled in the pool factory for stable id handling) returns
+    // COUNT() as a string too, so coerce before asserting.
     const [rows] = await pool.query(`SELECT COUNT(*) AS n FROM \`${table}\``);
-    expect((rows as Array<{ n: number | string }>)[0]?.n).toBe(1);
+    const remaining = Number((rows as Array<{ n: number | string }>)[0]?.n);
+    expect(remaining).toBe(1);
   });
 });

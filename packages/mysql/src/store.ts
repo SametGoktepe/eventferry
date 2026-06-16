@@ -162,9 +162,12 @@ export class MysqlStore implements OutboxStore {
     try {
       await conn.beginTransaction();
 
-      // The reaper window cutoff: any `processing` row claimed before this
-      // instant is presumed orphaned and eligible to re-claim.
-      const reaperCutoff = new Date(Date.now() - this.claimTimeoutMs);
+      // The reaper window cutoff is computed SERVER-SIDE
+      // (`DATE_SUB(NOW(3), INTERVAL ? MICROSECOND)`). Sending a JS Date as a
+      // bound value goes through mysql2's local-time serialiser, while NOW(3)
+      // returns the connection's clock; the two can drift by the host's TZ
+      // offset and the reaper fires (or fails to fire) at the wrong instant.
+      // Server-side INTERVAL sidesteps that entirely.
       const pendingClause = this.claimFailedOnly ? "" : "o.status = 0 OR ";
 
       const selectDue = `
@@ -172,7 +175,8 @@ export class MysqlStore implements OutboxStore {
         FROM \`${this.table}\` o
         WHERE (
               ${pendingClause}(o.status = 3 AND (o.next_retry_at IS NULL OR o.next_retry_at <= NOW(3)))
-           OR (o.status = 1 AND o.claimed_at IS NOT NULL AND o.claimed_at <= ?)
+           OR (o.status = 1 AND o.claimed_at IS NOT NULL
+                 AND o.claimed_at <= DATE_SUB(NOW(3), INTERVAL ? MICROSECOND))
         )
         AND NOT EXISTS (
               SELECT 1
@@ -185,7 +189,10 @@ export class MysqlStore implements OutboxStore {
         LIMIT ?
         FOR UPDATE SKIP LOCKED
       `;
-      const [dueRows] = await conn.query(selectDue, [reaperCutoff, batchSize]);
+      const [dueRows] = await conn.query(selectDue, [
+        this.claimTimeoutMs * 1000,
+        batchSize,
+      ]);
       const ids = (dueRows as Array<{ id: number | string | bigint }>).map(
         (r) => r.id,
       );
@@ -259,15 +266,16 @@ export class MysqlStore implements OutboxStore {
     const batchSize = opts.batchSize ?? 1000;
     let total = 0;
     for (;;) {
-      const cutoff = new Date(Date.now() - opts.olderThanMs);
+      // Same TZ-safety as claimBatch: compute the cutoff server-side via
+      // INTERVAL so the comparison never drifts vs the host's local time.
       const [result] = await this.pool.query(
         `DELETE FROM \`${this.table}\`
           WHERE status = ${DONE}
             AND processed_at IS NOT NULL
-            AND processed_at < ?
+            AND processed_at < DATE_SUB(NOW(3), INTERVAL ? MICROSECOND)
           ORDER BY id
           LIMIT ?`,
-        [cutoff, batchSize],
+        [opts.olderThanMs * 1000, batchSize],
       );
       const deleted = (result as { affectedRows?: number }).affectedRows ?? 0;
       total += deleted;
