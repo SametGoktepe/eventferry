@@ -1,7 +1,7 @@
 {
   "name": "@eventferry/all",
   "version": "1.0.4",
-  "description": "Meta-package: installs and re-exports all of eventferry (core + postgres + kafka + schema-registry)",
+  "description": "Meta-package: installs and re-exports all of eventferry (core + postgres + mysql + kafka + schema-registry)",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -34,6 +34,8 @@
     "redpanda",
     "postgres",
     "postgresql",
+    "mysql",
+    "mariadb",
     "schema-registry",
     "microservices",
     "distributed-systems",
@@ -57,6 +59,7 @@
   "dependencies": {
     "@eventferry/core": "workspace:*",
     "@eventferry/postgres": "workspace:*",
+    "@eventferry/mysql": "workspace:*",
     "@eventferry/kafka": "workspace:*",
     "@eventferry/schema-registry": "workspace:*"
   },

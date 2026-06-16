@@ -32,6 +32,9 @@ importers:
       '@eventferry/kafka':
         specifier: workspace:*
         version: link:../kafka
+      '@eventferry/mysql':
+        specifier: workspace:*
+        version: link:../mysql
       '@eventferry/postgres':
         specifier: workspace:*
         version: link:../postgres

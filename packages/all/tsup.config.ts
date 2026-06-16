@@ -10,6 +10,7 @@ export default defineConfig({
   external: [
     "@eventferry/core",
     "@eventferry/postgres",
+    "@eventferry/mysql",
     "@eventferry/kafka",
     "@eventferry/schema-registry",
   ],
