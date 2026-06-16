@@ -63,7 +63,13 @@ class FakePublisher implements Publisher {
   dlq: PublishableMessage[] = [];
   connects = 0;
   disconnects = 0;
-  constructor(private readonly failIds: Set<string> = new Set()) {}
+  constructor(
+    private readonly failIds: Set<string> = new Set(),
+    private readonly errorKindById: Map<
+      string,
+      "retriable" | "fatal" | "poison" | "backpressure" | "quota"
+    > = new Map(),
+  ) {}
 
   async connect(): Promise<void> {
     this.connects++;
@@ -74,7 +80,13 @@ class FakePublisher implements Publisher {
   async publish(messages: PublishableMessage[]): Promise<PublishResult[]> {
     return messages.map((m) => {
       if (this.failIds.has(m.recordId)) {
-        return { recordId: m.recordId, ok: false, error: new Error("boom") };
+        const errorKind = this.errorKindById.get(m.recordId);
+        return {
+          recordId: m.recordId,
+          ok: false,
+          error: new Error("boom"),
+          ...(errorKind ? { errorKind } : {}),
+        };
       }
       this.published.push(m);
       return { recordId: m.recordId, ok: true };
@@ -145,6 +157,115 @@ describe("Relay.tick", () => {
     expect(pub.dlq[0]?.topic).toBe("t.dlq");
     // The original destination is preserved as a header for triage.
     expect(pub.dlq[0]?.headers["original-topic"]).toBe("t");
+  });
+
+  it("fatal errorKind short-circuits retries straight to DLQ + dead", async () => {
+    // First attempt out of 5 allowed — under normal classification this would
+    // schedule a retry. Fatal classification must skip all retries.
+    const store = new FakeStore([makeRecord({ id: "1", attempts: 0 })]);
+    const pub = new FakePublisher(
+      new Set(["1"]),
+      new Map([["1", "fatal"]]),
+    );
+    const relay = new Relay({
+      store,
+      publisher: pub,
+      logger: new NoopLogger(),
+      retry: { maxAttempts: 5, baseMs: 10, maxMs: 100, strategy: "fixed" },
+      dlq: { topic: "t.dlq" },
+    });
+
+    await relay.tick();
+
+    expect(store.failed).toHaveLength(1);
+    expect(store.failed[0]?.status).toBe("dead");
+    expect(store.failed[0]?.retryAt).toBeNull();
+    expect(pub.dlq).toHaveLength(1);
+  });
+
+  it("poison errorKind short-circuits retries straight to DLQ + dead", async () => {
+    const store = new FakeStore([makeRecord({ id: "1", attempts: 0 })]);
+    const pub = new FakePublisher(
+      new Set(["1"]),
+      new Map([["1", "poison"]]),
+    );
+    const relay = new Relay({
+      store,
+      publisher: pub,
+      logger: new NoopLogger(),
+      retry: { maxAttempts: 5, baseMs: 10, maxMs: 100, strategy: "fixed" },
+      dlq: { topic: "t.dlq" },
+    });
+
+    await relay.tick();
+
+    expect(store.failed[0]?.status).toBe("dead");
+    expect(pub.dlq).toHaveLength(1);
+  });
+
+  it("retriable errorKind preserves existing retry behavior", async () => {
+    const store = new FakeStore([makeRecord({ id: "1", attempts: 0 })]);
+    const pub = new FakePublisher(
+      new Set(["1"]),
+      new Map([["1", "retriable"]]),
+    );
+    const relay = new Relay({
+      store,
+      publisher: pub,
+      logger: new NoopLogger(),
+      retry: { maxAttempts: 5, baseMs: 10, maxMs: 100, strategy: "fixed" },
+    });
+
+    await relay.tick();
+
+    expect(store.failed[0]?.status).toBe("failed");
+    expect(store.failed[0]?.retryAt).toBeInstanceOf(Date);
+  });
+
+  it("backpressure and quota currently retry (backward compat for v2.1)", async () => {
+    // backpressure/quota are reserved categories; in this MVP the relay
+    // treats them like retriable so existing semantics are unchanged. Smarter
+    // handling (pause / longer backoff) lands in a follow-up.
+    const store = new FakeStore([
+      makeRecord({ id: "bp", attempts: 0 }),
+      makeRecord({ id: "qt", attempts: 0 }),
+    ]);
+    const pub = new FakePublisher(
+      new Set(["bp", "qt"]),
+      new Map<string, "backpressure" | "quota">([
+        ["bp", "backpressure"],
+        ["qt", "quota"],
+      ]),
+    );
+    const relay = new Relay({
+      store,
+      publisher: pub,
+      logger: new NoopLogger(),
+      retry: { maxAttempts: 5, baseMs: 10, maxMs: 100, strategy: "fixed" },
+    });
+
+    await relay.tick();
+
+    expect(store.failed.map((f) => f.status)).toEqual(["failed", "failed"]);
+    expect(store.failed[0]?.retryAt).toBeInstanceOf(Date);
+    expect(store.failed[1]?.retryAt).toBeInstanceOf(Date);
+  });
+
+  it("undefined errorKind retains pre-classification behavior (backward compat)", async () => {
+    // No errorKind on the result — older publisher implementations.
+    const store = new FakeStore([makeRecord({ id: "1", attempts: 0 })]);
+    const pub = new FakePublisher(new Set(["1"]));
+    const relay = new Relay({
+      store,
+      publisher: pub,
+      logger: new NoopLogger(),
+      retry: { maxAttempts: 5, baseMs: 10, maxMs: 100, strategy: "fixed" },
+    });
+
+    await relay.tick();
+
+    expect(store.failed[0]?.status).toBe("failed");
+    expect(store.failed[0]?.retryAt).toBeInstanceOf(Date);
   });
 
   it("handles partial batch failure", async () => {

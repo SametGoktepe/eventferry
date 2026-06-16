@@ -87,12 +87,50 @@ export interface PublishableMessage {
 }
 
 /**
+ * Why a publish failed, in terms the relay can act on. Drivers classify their
+ * native errors into one of these buckets; the relay reads `errorKind` to
+ * decide whether to retry, short-circuit to the DLQ, or pause polling. The
+ * field is optional for backward compatibility — when absent, the relay
+ * treats the error as `"retriable"`.
+ *
+ * - `retriable` — transient (broker unreachable, leader election, request
+ *   timeout); retry per the configured backoff policy. The default for any
+ *   unclassified error.
+ * - `fatal` — the producer or the credentials are broken (fenced epoch,
+ *   authentication failed, ACL denied). Retrying cannot help; the relay
+ *   short-circuits straight to the DLQ + `dead` status.
+ * - `poison` — the message itself is rejectable by every broker
+ *   (oversized record, corrupt payload, schema-registry refused encoding).
+ *   Same handling as `fatal`: DLQ + dead, no retries.
+ * - `backpressure` — the *producer's own* outbound buffer is full
+ *   (librdkafka `__QUEUE_FULL`). The right response is to slow the relay
+ *   down, not to burn retries. v2.1 treats this as `retriable` for
+ *   compatibility; smarter handling (pause polling) is planned.
+ * - `quota` — the broker is throttling us (`THROTTLING_QUOTA_EXCEEDED`).
+ *   Back off with longer delays. v2.1 treats as `retriable`; smarter
+ *   handling (longer backoff) is planned.
+ */
+export type PublishErrorKind =
+  | "retriable"
+  | "fatal"
+  | "poison"
+  | "backpressure"
+  | "quota";
+
+/**
  * Result of attempting to publish a single message.
  */
 export interface PublishResult {
   recordId: string;
   ok: boolean;
   error?: Error;
+  /**
+   * Optional classification of `error` for relay-level decision-making. Set
+   * by publisher implementations that know how to inspect their native error
+   * shapes. Absent value is treated as `"retriable"` by the relay (the safe
+   * default — at worst we retry an error we should have skipped).
+   */
+  errorKind?: PublishErrorKind;
 }
 
 /**
