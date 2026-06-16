@@ -1,5 +1,11 @@
 # @eventferry/core
 
+## 1.0.4
+
+### Patch Changes
+
+- 64d115d: docs / metadata: expand `keywords` on all packages for better npm and LLM discoverability (outbox-pattern, dual-write, cdc, event-driven, microservices, etc.). No code changes.
+
 ## 1.0.3
 
 ### Patch Changes
