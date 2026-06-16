@@ -1,0 +1,72 @@
+{
+  "name": "@eventferry/mysql",
+  "version": "1.0.4",
+  "description": "MySQL / MariaDB store for @eventferry (polling + SKIP LOCKED claim)",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./migrations": {
+      "types": "./dist/migrations.d.ts",
+      "import": "./dist/migrations.js",
+      "require": "./dist/migrations.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "outbox",
+    "outbox-pattern",
+    "transactional-outbox",
+    "mysql",
+    "mariadb",
+    "mysql2",
+    "skip-locked",
+    "event-driven",
+    "event-publishing",
+    "microservices",
+    "nodejs",
+    "typescript"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SametGoktepe/eventferry.git",
+    "directory": "packages/mysql"
+  },
+  "homepage": "https://github.com/SametGoktepe/eventferry/tree/main/packages/mysql#readme",
+  "bugs": "https://github.com/SametGoktepe/eventferry/issues",
+  "engines": {
+    "node": ">=18"
+  },
+  "peerDependencies": {
+    "@eventferry/core": "workspace:*",
+    "mysql2": "^3.0.0",
+    "@vlasky/zongji": "^0.6.0"
+  },
+  "peerDependenciesMeta": {
+    "@vlasky/zongji": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@eventferry/core": "workspace:*",
+    "mysql2": "^3.11.5",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

@@ -159,8 +159,8 @@ quadrantChart
 
 | Database | Package | Tx enqueue | Skip-locked claim | Native waker | CDC streaming | Driver |
 |---|---|:--:|:--:|:--:|:--:|---|
-| **PostgreSQL** | `@eventferry/postgres` | ✅ | `FOR UPDATE SKIP LOCKED` | `LISTEN/NOTIFY` | logical replication (WAL / pgoutput) | `pg` |
-| **MySQL / MariaDB** | `@eventferry/mysql` | ✅ (InnoDB) | ✅ MySQL 8.0.1+ / MariaDB 10.6+ | ❌ → polling | binlog (row-based) | `mysql2` |
+| **PostgreSQL** | `@eventferry/postgres` ✅ shipped | ✅ | `FOR UPDATE SKIP LOCKED` | `LISTEN/NOTIFY` | logical replication (WAL / pgoutput) | `pg` |
+| **MySQL / MariaDB** | `@eventferry/mysql` ✅ shipped | ✅ (InnoDB) | ✅ MySQL 8.0.1+ / MariaDB 10.6+ | ❌ → polling | binlog (planned) | `mysql2` |
 | **SQL Server** | `@eventferry/mssql` | ✅ | `READPAST + UPDLOCK + ROWLOCK` | Query Notifications / Service Broker | native CDC / Change Tracking | `mssql` |
 | **MongoDB** | `@eventferry/mongodb` | ✅ (replica set 4.0+) | atomic `findOneAndUpdate` + claim token | **Change Streams** | **Change Streams** (oplog) | `mongodb` |
 | **CockroachDB** | `@eventferry/cockroach` | ✅ | `FOR UPDATE` (SKIP LOCKED 22.2+) | ❌ → polling | `CHANGEFEED` | `pg` |
@@ -175,12 +175,12 @@ quadrantChart
 The three databases that cover the bulk of "we don't run Postgres" requests, each
 with a clean answer for all three pillars.
 
-### MySQL / MariaDB — `@eventferry/mysql`
-- [ ] `claimBatch` via `SELECT ... FOR UPDATE SKIP LOCKED` (MySQL **8.0.1+**, MariaDB **10.6+**)
+### MySQL / MariaDB — `@eventferry/mysql` ✅ shipped
+- [x] `claimBatch` via `SELECT ... FOR UPDATE SKIP LOCKED` (MySQL **8.0.1+**, MariaDB **10.6+**)
+- [x] Polling-only by default (MySQL has no `LISTEN/NOTIFY`)
+- [x] Binlog (row-based) streaming relay — `MysqlBinlogRelay` via `@vlasky/zongji`
 - [ ] Documented fallback for older engines: atomic status-flip with `UPDATE ... ORDER BY id LIMIT n` + claim token
-- [ ] Polling waker by default (MySQL has no `LISTEN/NOTIFY`)
-- [ ] *(optional)* binlog (row-based) streaming relay — the MySQL analogue of the WAL relay
-- [ ] Passes the shared conformance kit on MySQL 8 **and** MariaDB
+- [ ] Passes the shared conformance kit on MySQL 8 **and** MariaDB (integration suite)
 
 ### SQL Server — `@eventferry/mssql`
 - [ ] `claimBatch` via `UPDATE TOP (n) ... WITH (READPAST, UPDLOCK, ROWLOCK) ... OUTPUT inserted.*` (atomic claim-and-read)
