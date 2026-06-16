@@ -1,4 +1,5 @@
 import type { PublishableMessage, PublishResult } from "@eventferry/core";
+import { classifyKafkajsError } from "./kafkajs-classifier.js";
 import type {
   KafkaConnectionConfig,
   KafkaDriver,
@@ -86,8 +87,7 @@ export class KafkaJsDriver implements KafkaDriver {
         return messages.map((m) => ({ recordId: m.recordId, ok: true }));
       } catch (err) {
         await txn.abort().catch(() => undefined);
-        const error = err instanceof Error ? err : new Error(String(err));
-        return messages.map((m) => ({ recordId: m.recordId, ok: false, error }));
+        return failedResults(messages, err);
       }
     }
 
@@ -95,10 +95,23 @@ export class KafkaJsDriver implements KafkaDriver {
       await this.producer.sendBatch({ topicMessages, acks: this.opts.acks ?? -1 });
       return messages.map((m) => ({ recordId: m.recordId, ok: true }));
     } catch (err) {
-      const error = err instanceof Error ? err : new Error(String(err));
-      return messages.map((m) => ({ recordId: m.recordId, ok: false, error }));
+      return failedResults(messages, err);
     }
   }
+}
+
+function failedResults(
+  messages: PublishableMessage[],
+  err: unknown,
+): PublishResult[] {
+  const error = err instanceof Error ? err : new Error(String(err));
+  const errorKind = classifyKafkajsError(err);
+  return messages.map((m) => ({
+    recordId: m.recordId,
+    ok: false,
+    error,
+    errorKind,
+  }));
 }
 
 function groupByTopic(messages: PublishableMessage[], compression?: string) {

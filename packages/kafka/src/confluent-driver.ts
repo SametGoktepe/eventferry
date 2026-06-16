@@ -1,4 +1,5 @@
 import type { PublishableMessage, PublishResult } from "@eventferry/core";
+import { classifyConfluentError } from "./confluent-classifier.js";
 import type {
   KafkaConnectionConfig,
   KafkaDriver,
@@ -105,8 +106,7 @@ export class ConfluentDriver implements KafkaDriver {
         return messages.map((m) => ({ recordId: m.recordId, ok: true }));
       } catch (err) {
         await txn.abort().catch(() => undefined);
-        const error = err instanceof Error ? err : new Error(String(err));
-        return messages.map((m) => ({ recordId: m.recordId, ok: false, error }));
+        return failedResults(messages, err);
       }
     }
 
@@ -114,10 +114,23 @@ export class ConfluentDriver implements KafkaDriver {
       await doSends(this.producer);
       return messages.map((m) => ({ recordId: m.recordId, ok: true }));
     } catch (err) {
-      const error = err instanceof Error ? err : new Error(String(err));
-      return messages.map((m) => ({ recordId: m.recordId, ok: false, error }));
+      return failedResults(messages, err);
     }
   }
+}
+
+function failedResults(
+  messages: PublishableMessage[],
+  err: unknown,
+): PublishResult[] {
+  const error = err instanceof Error ? err : new Error(String(err));
+  const errorKind = classifyConfluentError(err);
+  return messages.map((m) => ({
+    recordId: m.recordId,
+    ok: false,
+    error,
+    errorKind,
+  }));
 }
 
 function groupByTopic(messages: PublishableMessage[]) {

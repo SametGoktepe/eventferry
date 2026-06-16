@@ -7,6 +7,7 @@ import type {
   OutboxRecord,
   OutboxStore,
   PublishableMessage,
+  PublishErrorKind,
   Publisher,
   RelayHooks,
   RetryConfig,
@@ -160,6 +161,7 @@ export class Relay {
         await this.handleFailure(
           record,
           result.error ?? new Error("unknown publish error"),
+          result.errorKind,
         );
       }
     }
@@ -174,9 +176,14 @@ export class Relay {
   private async handleFailure(
     record: OutboxRecord,
     error: Error,
+    errorKind?: PublishErrorKind,
   ): Promise<void> {
     const attempts = record.attempts + 1;
-    const retryAt = nextRetryAt(this.retry, attempts);
+    // fatal/poison short-circuit: retrying cannot help (auth denied, fenced
+    // epoch, oversized record, schema rejected). Skip the backoff schedule
+    // entirely and go straight to DLQ + dead.
+    const isTerminalKind = errorKind === "fatal" || errorKind === "poison";
+    const retryAt = isTerminalKind ? null : nextRetryAt(this.retry, attempts);
     const willRetry = retryAt !== null;
 
     this.hooks.onFailed?.(record, error, willRetry);
@@ -184,6 +191,7 @@ export class Relay {
       recordId: record.id,
       attempts,
       willRetry,
+      errorKind: errorKind ?? "retriable",
       error: error.message,
     });
 
