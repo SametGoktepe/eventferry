@@ -1,5 +1,16 @@
 # @eventferry/all
 
+## 3.2.4
+
+### Patch Changes
+
+- Updated dependencies [3e0c5ee]
+- Updated dependencies [ac7a964]
+- Updated dependencies [4007a8e]
+- Updated dependencies [d983d90]
+  - @eventferry/kafka@3.4.0
+  - @eventferry/schema-registry@3.3.0
+
 ## 3.2.3
 
 ### Patch Changes

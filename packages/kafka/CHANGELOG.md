@@ -1,5 +1,20 @@
 # @eventferry/kafka
 
+## 3.4.0
+
+### Minor Changes
+
+- 3e0c5ee: Add typed admin surface to `KafkaPublisher`: `publisher.admin()` borrows a connected admin client (caller closes it), `publisher.ensureTopics()` idempotently provisions topics with an optional `growPartitions` flag, and a new `validateTopicsOnConnect` option fails fast at startup when expected topics are missing. Implemented on both the kafkajs and confluent drivers; custom drivers that don't implement the optional `admin()` method get a clear error message instead of a silent surprise.
+- ac7a964: Add consumer-side helpers via the new `@eventferry/kafka/consume` subpath import: `decode(message, { decoder })` normalizes the raw message shape (key, value, headers, offset, timestamp, partition) both kafkajs and confluent deliver — with built-in `json` / `utf8` / `none` decoders plus a custom-function escape hatch; `extractTraceContext(headers)` parses the W3C `traceparent` / `tracestate` headers (strict validation per the W3C Trace Context spec) and accepts both raw (Buffer) and decoded (string) header shapes. Paired on the producer side with a new optional `KafkaTracer.inject(span, headers)` hook so OpenTelemetry users can complete the publish→consume trace propagation in two lines. The publisher clones each message before invoking `inject` — the caller's `PublishableMessage` references are never mutated, keeping the relay's retry path safe.
+- 4007a8e: Power-user escape hatches for both drivers. The high-level options cover ~95% of cases; these let you reach into the native client when you need a knob we don't expose typed.
+
+  - `compressionLevel`: per-codec level (confluent only, e.g. `zstd` level 1-22). Maps to librdkafka's `compression.level`. The kafkajs driver warns once and ignores it (kafkajs has no codec-level config).
+  - `rawProducerConfig`: raw librdkafka keys merged into the confluent producer config. Native keys **win** against eventferry's translated ones — use this to override defaults or to tune surface area (queue buffering, statistics interval, socket keepalive, …) we don't expose.
+  - `rawKafkaJsProducerConfig`: same idea for kafkajs — raw keys merged into `kafka.producer({...})` with last-write-wins precedence.
+  - `customPartitioner`: kafkajs partitioner factory (`() => (args) => number`). Overrides the `partitioner` preset entirely. Confluent ignores it — librdkafka's partitioner is a C-level extension point.
+
+  Native config takes precedence over eventferry's translated keys in every case — that's the contract of an escape hatch.
+
 ## 3.3.1
 
 ### Patch Changes
