@@ -35,6 +35,75 @@ const publisher = new KafkaPublisher({
 
 You can also pass a `customDriver` implementing the `KafkaDriver` interface.
 
+## Authentication & TLS
+
+### One-way TLS
+
+```ts
+new KafkaPublisher({
+  brokers: ["broker:9093"],
+  ssl: true, // uses the driver's default trust store
+});
+```
+
+### mTLS (mutual TLS)
+
+```ts
+import { readFileSync } from "node:fs";
+
+new KafkaPublisher({
+  brokers: ["broker:9093"],
+  ssl: {
+    ca: readFileSync("/etc/ssl/kafka-ca.pem"),
+    cert: readFileSync("/etc/ssl/client.pem"),
+    key: readFileSync("/etc/ssl/client-key.pem"),
+    passphrase: "optional",
+    // servername: "broker.example.com",   // SNI override if cert SAN differs
+  },
+});
+```
+
+> `rejectUnauthorized` is intentionally NOT a knob. TLS verification is
+> non-negotiable. For dev clusters with self-signed certs, pass the cluster
+> CA via `ca` so verification succeeds.
+
+### SASL — username + password (PLAIN / SCRAM)
+
+```ts
+new KafkaPublisher({
+  brokers: ["broker:9093"],
+  ssl: true,
+  sasl: {
+    mechanism: "scram-sha-512", // or "plain" | "scram-sha-256"
+    username: process.env.KAFKA_USER!,
+    password: process.env.KAFKA_PASSWORD!,
+  },
+});
+```
+
+### SASL/OAUTHBEARER (Azure Event Hubs, OIDC, MSK IAM)
+
+```ts
+new KafkaPublisher({
+  brokers: ["broker:9093"],
+  ssl: true,
+  sasl: {
+    mechanism: "oauthbearer",
+    oauthBearerProvider: async () => {
+      const token = await myTokenIssuer();
+      return {
+        value: token.value,           // required for both drivers
+        principal: token.principal,   // required for confluent driver
+        lifetime: token.expiresInMs,  // required for confluent driver
+        extensions: token.extensions, // optional
+      };
+    },
+  },
+});
+```
+
+> **Driver asymmetry:** `kafkajs` reads only `value`; `@confluentinc/kafka-javascript` requires `value` + `principal` + `lifetime` (in milliseconds) and accepts an optional `extensions` map. Cross-driver portable providers should populate all four fields.
+
 📖 **Full documentation:** [github.com/SametGoktepe/eventferry](https://github.com/SametGoktepe/eventferry#readme)
 
 ## License
