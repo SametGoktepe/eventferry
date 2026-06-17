@@ -1,10 +1,10 @@
 # @eventferry/postgres
 
-## 4.0.0
+## 3.2.0
 
 ### Patch Changes
 
-- @eventferry/core@4.0.0
+- @eventferry/core@3.2.0
 
 ## 3.1.0
 
