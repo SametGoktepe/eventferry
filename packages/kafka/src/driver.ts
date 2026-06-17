@@ -1,4 +1,5 @@
 import type { PublishableMessage, PublishResult } from "@eventferry/core";
+import type { KafkaDriverAdmin } from "./admin.js";
 
 /**
  * Low-level driver contract. Each concrete driver (kafkajs, confluent)
@@ -21,6 +22,15 @@ export interface KafkaDriver {
    * uses this to decide whether `sendBatch` is atomic.
    */
   readonly transactional: boolean;
+
+  /**
+   * Construct a NEW admin client. The returned admin is not yet connected —
+   * the publisher calls `.connect()` before handing it to the user.
+   *
+   * Optional: drivers without an admin surface may omit this; the publisher
+   * throws a clear error when `publisher.admin()` is called on such a driver.
+   */
+  admin?(): Promise<KafkaDriverAdmin>;
 }
 
 /**

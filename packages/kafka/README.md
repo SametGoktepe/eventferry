@@ -284,6 +284,74 @@ new KafkaPublisher({
 
 When omitted, the publisher is silent and the driver falls back to `console.warn` for its diagnostics (preserves prior behavior).
 
+## Admin operations
+
+The publisher exposes a typed admin surface for listing/describing/creating topics — handy for provisioning in CI, integration tests, or app boot.
+
+### `publisher.admin()`
+
+Borrow a fresh admin client. The returned client is connected and ready; the **caller** is responsible for closing it.
+
+```ts
+const admin = await publisher.admin();
+try {
+  const topics = await admin.listTopics();
+  const desc = await admin.describeTopics(["orders"]);
+  console.log(desc[0].partitions.length); // partition count
+} finally {
+  await admin.close();
+}
+```
+
+Methods on the returned `KafkaAdmin`:
+
+- `listTopics(): Promise<string[]>` — all topic names visible to this principal.
+- `describeTopics(topics): Promise<TopicMetadata[]>` — partition / leader / ISR per topic. Missing topics come back with an empty `partitions` array (no try/catch needed to detect absence).
+- `createTopics(specs)` — idempotent: existing topics are silently skipped.
+- `createPartitions(specs)` — grow a topic's partition count (Kafka does not support shrinking).
+- `close()` — disconnect.
+
+### `publisher.ensureTopics()`
+
+One-shot, idempotent provisioning built on top of the admin surface:
+
+```ts
+await publisher.ensureTopics([
+  { topic: "orders", numPartitions: 12, replicationFactor: 3 },
+  { topic: "orders.dlq", numPartitions: 3, replicationFactor: 3, configEntries: { "retention.ms": "604800000" } },
+]);
+
+// Optionally grow existing topics whose partition count is below the requested numPartitions:
+await publisher.ensureTopics(
+  [{ topic: "orders", numPartitions: 24 }],
+  { growPartitions: true },
+);
+```
+
+What it does:
+
+- Creates topics that don't exist.
+- Skips topics that already exist (no error, no surprise alter).
+- With `growPartitions: true`, calls `createPartitions` for existing topics whose current partition count is **below** the requested `numPartitions`.
+
+What it does NOT do (by design):
+
+- Reconcile replication factor on existing topics — Kafka has no safe in-place alter (use partition reassignment for that).
+- Reconcile `configEntries` on existing topics — use `kafka-configs.sh` or the raw admin client (kafkajs's `alterConfigs`) if you need that.
+
+### `validateTopicsOnConnect`
+
+Fail-fast at startup if expected topics are missing:
+
+```ts
+new KafkaPublisher({
+  brokers,
+  validateTopicsOnConnect: ["orders", "orders.dlq", "events"],
+});
+```
+
+`connect()` opens an admin, runs `listTopics`, and throws a single descriptive error naming **every** missing topic. The admin is always closed (success or failure). Skip the check entirely with an empty list or by omitting the option.
+
 📖 **Full documentation:** [github.com/SametGoktepe/eventferry](https://github.com/SametGoktepe/eventferry#readme)
 
 ## License
