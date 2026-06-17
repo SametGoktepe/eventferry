@@ -1,6 +1,7 @@
 import type { PublishableMessage, PublishResult } from "@eventferry/core";
 import { classifyConfluentError } from "./confluent-classifier.js";
 import { buildConfluentClientConfig } from "./confluent-config.js";
+import { resolveTransactionalId } from "./transactional-id.js";
 import type {
   KafkaConnectionConfig,
   KafkaDriver,
@@ -64,12 +65,15 @@ export class ConfluentDriver implements KafkaDriver {
       kafkaJS,
       ...librdkafka,
     });
+    // Resolve a callable transactionalId — async-safe so runtime context
+    // (pod name, AZ index, k8s ordinal) can be derived at connect time.
+    const resolvedTxId = this.transactional
+      ? await resolveTransactionalId(this.opts.transactionalId)
+      : undefined;
     return kafka.producer({
       kafkaJS: {
         idempotent: this.opts.idempotent ?? true,
-        ...(this.transactional
-          ? { transactionalId: this.opts.transactionalId }
-          : {}),
+        ...(resolvedTxId ? { transactionalId: resolvedTxId } : {}),
       },
     });
   }
@@ -104,6 +108,12 @@ export class ConfluentDriver implements KafkaDriver {
         return messages.map((m) => ({ recordId: m.recordId, ok: true }));
       } catch (err) {
         await txn.abort().catch(() => undefined);
+        const error = err instanceof Error ? err : new Error(String(err));
+        try {
+          this.opts.onTransactionAbort?.(error);
+        } catch {
+          // swallow — abort hook is best-effort
+        }
         return failedResults(messages, err);
       }
     }

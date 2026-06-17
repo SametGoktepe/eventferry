@@ -4,6 +4,7 @@ import type {
   PublishResult,
 } from "@eventferry/core";
 import { classifyKafkajsError } from "./kafkajs-classifier.js";
+import { resolveTransactionalId } from "./transactional-id.js";
 import type {
   KafkaConnectionConfig,
   KafkaDriver,
@@ -107,6 +108,11 @@ export class KafkaJsDriver implements KafkaDriver {
       this.opts.partitioner,
       this.transactional,
     );
+    // Resolve a callable transactionalId — async-safe so runtime context
+    // (pod name, AZ index, k8s ordinal) can be derived at connect time.
+    const resolvedTxId = this.transactional
+      ? await resolveTransactionalId(this.opts.transactionalId)
+      : undefined;
     return kafka.producer({
       idempotent: this.opts.idempotent ?? true,
       // Idempotent / transactional producers cap maxInFlight at 5. When the
@@ -116,9 +122,7 @@ export class KafkaJsDriver implements KafkaDriver {
       maxInFlightRequests: this.transactional
         ? 1
         : this.opts.maxInFlightRequests,
-      transactionalId: this.transactional
-        ? this.opts.transactionalId
-        : undefined,
+      transactionalId: resolvedTxId,
       // kafkajs accepts these directly when set; undefined falls through to
       // the kafkajs default.
       requestTimeout: this.opts.requestTimeoutMs,
@@ -146,6 +150,15 @@ export class KafkaJsDriver implements KafkaDriver {
         return messages.map((m) => ({ recordId: m.recordId, ok: true }));
       } catch (err) {
         await txn.abort().catch(() => undefined);
+        const error = err instanceof Error ? err : new Error(String(err));
+        // Notify the abort hook BEFORE returning failedResults. The hook is
+        // best-effort: try/catch around it so a misbehaving hook can't make
+        // the abort path itself throw.
+        try {
+          this.opts.onTransactionAbort?.(error);
+        } catch {
+          // swallow — already documented as best-effort
+        }
         return failedResults(messages, err);
       }
     }
