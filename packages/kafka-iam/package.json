@@ -1,0 +1,67 @@
+{
+  "name": "@eventferry/kafka-iam",
+  "version": "0.1.0",
+  "description": "AWS MSK IAM (SASL/OAUTHBEARER over SigV4) helper for @eventferry/kafka",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "outbox",
+    "transactional-outbox",
+    "kafka",
+    "msk",
+    "aws-msk",
+    "aws-iam",
+    "sasl-oauthbearer",
+    "sigv4",
+    "event-driven",
+    "nodejs",
+    "typescript"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SametGoktepe/eventferry.git",
+    "directory": "packages/kafka-iam"
+  },
+  "homepage": "https://github.com/SametGoktepe/eventferry/tree/main/packages/kafka-iam#readme",
+  "bugs": "https://github.com/SametGoktepe/eventferry/issues",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@eventferry/kafka": "workspace:*"
+  },
+  "peerDependencies": {
+    "aws-msk-iam-sasl-signer-js": "^1.0.0"
+  },
+  "peerDependenciesMeta": {
+    "aws-msk-iam-sasl-signer-js": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@eventferry/kafka": "workspace:*",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
