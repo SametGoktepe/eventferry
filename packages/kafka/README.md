@@ -590,6 +590,50 @@ await consumer.run({
 
 `extractTraceContext` returns `null` if no `traceparent` header is present or it fails W3C validation (all-zero IDs, `version: ff`, malformed hex). It accepts both raw consumer headers (Buffer values) and already-decoded headers (string values).
 
+#### Typed payload via the producer-side registry
+
+When your consumer lives in the same monorepo as the producer, hand the decoded bytes to the **same `defineOutbox(registry)`** you used to enqueue. `decode` validates against the topic's Standard Schema and returns the typed payload:
+
+```ts
+import { defineOutbox } from "@eventferry/core";
+import { decode } from "@eventferry/kafka/consume";
+import { registry } from "./outbox-registry";
+
+const events = defineOutbox(registry); // no store — consumer side
+
+await consumer.run({
+  eachMessage: async ({ message }) => {
+    const m = decode(message, { decoder: "utf8" });
+    const event = await events.decode("orders.created", m.value!);
+    //    ^? { orderId: string; total: number }
+    await handle(event);
+  },
+});
+```
+
+`events.decode(topic, bytes)` throws `OutboxValidationError` if the topic isn't in the registry or the payload doesn't match the schema. Cross-language consumers (Go, Java, Python) skip the companion and use their own schema tooling — Confluent Schema Registry for typed wire formats.
+
+#### DLQ recipe
+
+Records that exhaust retries land on `${topic}.dlq` (or your configured DLQ topic) carrying enriched headers `dlq-reason`, `dlq-error-class`, `dlq-original-topic`, `dlq-failed-at`, `dlq-attempts` (and optionally `dlq-stack` when you opt in). Route them with `dlq-error-class` rather than parsing `dlq-reason`:
+
+```ts
+await dlqConsumer.run({
+  eachMessage: async ({ message }) => {
+    const m = decode(message);
+    const errClass = m.headers["dlq-error-class"];
+    if (errClass === "KafkaJSProtocolError" && m.headers["dlq-reason"]?.includes("MESSAGE_TOO_LARGE")) {
+      await ticket.create({ title: `Oversized DLQ from ${m.headers["dlq-original-topic"]}` });
+    } else {
+      await retryQueue.put({
+        payload: m.value,
+        attemptsSoFar: Number(m.headers["dlq-attempts"] ?? "0"),
+      });
+    }
+  },
+});
+```
+
 ### `validateTopicsOnConnect`
 
 Fail-fast at startup if expected topics are missing:
