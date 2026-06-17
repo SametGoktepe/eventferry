@@ -181,4 +181,41 @@ describe("buildConfluentClientConfig — producer tuning passthrough", () => {
     });
     expect(librdkafka["linger.ms"]).toBe(0);
   });
+
+  it("compressionLevel maps to librdkafka compression.level", () => {
+    const { librdkafka } = buildConfluentClientConfig({
+      brokers: ["b:9092"],
+      compression: "zstd",
+      compressionLevel: 9,
+    });
+    expect(librdkafka["compression.level"]).toBe(9);
+  });
+});
+
+describe("buildConfluentClientConfig — rawProducerConfig escape hatch", () => {
+  it("merges raw keys into librdkafka config", () => {
+    const { librdkafka } = buildConfluentClientConfig({
+      brokers: ["b:9092"],
+      rawProducerConfig: {
+        "queue.buffering.max.messages": 100_000,
+        "statistics.interval.ms": 5000,
+      },
+    });
+    expect(librdkafka["queue.buffering.max.messages"]).toBe(100_000);
+    expect(librdkafka["statistics.interval.ms"]).toBe(5000);
+  });
+
+  it("raw keys WIN against translated ones (escape-hatch precedence)", () => {
+    const { librdkafka } = buildConfluentClientConfig({
+      brokers: ["b:9092"],
+      lingerMs: 10,
+      rawProducerConfig: { "linger.ms": 50 },
+    });
+    expect(librdkafka["linger.ms"]).toBe(50);
+  });
+
+  it("absent rawProducerConfig leaves librdkafka config untouched", () => {
+    const { librdkafka } = buildConfluentClientConfig({ brokers: ["b:9092"] });
+    expect(librdkafka).toEqual({});
+  });
 });

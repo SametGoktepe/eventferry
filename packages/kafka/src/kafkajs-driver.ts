@@ -99,6 +99,9 @@ const UNSUPPORTED_BY_KAFKAJS = [
   "batchSize",
   "deliveryTimeoutMs",
   "maxRequestSize",
+  // Confluent-only escape hatches; ignored on kafkajs.
+  "compressionLevel",
+  "rawProducerConfig",
 ] as const;
 
 /**
@@ -144,17 +147,31 @@ export class KafkaJsDriver implements KafkaDriver {
       // the provider's returned token (other fields are ignored).
       sasl: this.opts.sasl,
     });
-    const createPartitioner = resolveCreatePartitioner(
-      mod.Partitioners,
-      this.opts.partitioner,
-      this.transactional,
-    );
+    return kafka.producer(await this.buildProducerOptions(mod.Partitioners));
+  }
+
+  /**
+   * Compute the options object passed to `kafka.producer({...})`. Exposed
+   * as a test seam so power-user escape hatches (customPartitioner,
+   * rawKafkaJsProducerConfig) can be asserted without a live broker.
+   */
+  protected async buildProducerOptions(
+    partitioners: KjsPartitionersNamespace | undefined,
+  ): Promise<Record<string, unknown>> {
+    // Custom partitioner (escape hatch) wins over the preset `partitioner` choice.
+    const createPartitioner =
+      this.opts.customPartitioner ??
+      resolveCreatePartitioner(
+        partitioners,
+        this.opts.partitioner,
+        this.transactional,
+      );
     // Resolve a callable transactionalId — async-safe so runtime context
     // (pod name, AZ index, k8s ordinal) can be derived at connect time.
     const resolvedTxId = this.transactional
       ? await resolveTransactionalId(this.opts.transactionalId)
       : undefined;
-    return kafka.producer({
+    return {
       idempotent: this.opts.idempotent ?? true,
       // Idempotent / transactional producers cap maxInFlight at 5. When the
       // user picks transactional we force 1 to keep strict ordering across
@@ -171,7 +188,11 @@ export class KafkaJsDriver implements KafkaDriver {
       // Setting any partitioner choice silences kafkajs's
       // KafkaJSPartitionerNotSpecified warning.
       createPartitioner,
-    });
+      // Power-user escape hatch — merged LAST so raw keys win against the
+      // translated ones. That's the contract: anything you put here is
+      // final, even if it overrides idempotent/transactionalId/etc.
+      ...(this.opts.rawKafkaJsProducerConfig ?? {}),
+    };
   }
 
   async disconnect(): Promise<void> {

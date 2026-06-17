@@ -289,6 +289,71 @@ const tracer: KafkaTracer = {
 
 The publisher clones each outbound message before injecting (the caller's `PublishableMessage` is never mutated, so the relay's retry path stays correct).
 
+## Power-user escape hatches
+
+When the high-level options don't reach a knob you need, drop down to the native client config.
+
+### Compression level
+
+```ts
+new KafkaPublisher({
+  brokers,
+  driver: "confluent",
+  compression: "zstd",
+  compressionLevel: 9, // librdkafka compression.level
+});
+```
+
+Confluent only. The kafkajs driver logs a one-time warning and ignores it (kafkajs does not expose codec levels). Default level is the codec's broker-friendly default.
+
+### Raw librdkafka producer config (confluent driver)
+
+```ts
+new KafkaPublisher({
+  brokers,
+  driver: "confluent",
+  rawProducerConfig: {
+    "queue.buffering.max.messages": 100_000,
+    "statistics.interval.ms": 5_000,
+    "socket.keepalive.enable": true,
+  },
+});
+```
+
+Merged on TOP of eventferry's translated config — raw keys **win** against the translated ones. Use this to override defaults (set `linger.ms` directly) or to tune surface area we don't expose (`queue.buffering.max.kbytes`, etc.).
+
+### Raw kafkajs producer config (kafkajs driver)
+
+```ts
+new KafkaPublisher({
+  brokers,
+  driver: "kafkajs",
+  rawKafkaJsProducerConfig: {
+    retry: { retries: 7, initialRetryTime: 250 },
+    metadataMaxAge: 5_000,
+  },
+});
+```
+
+Same precedence — raw keys win. Use for kafkajs-internal knobs (`retry`, `metadataMaxAge`) or to override defaults like `idempotent`.
+
+### Custom partitioner (kafkajs driver)
+
+```ts
+const tenantAwarePartitioner = () => ({ topic, partitionMetadata, message }) => {
+  const tenant = message.headers["x-tenant"]?.toString();
+  return hashToPartition(tenant, partitionMetadata.length);
+};
+
+new KafkaPublisher({
+  brokers,
+  driver: "kafkajs",
+  customPartitioner: tenantAwarePartitioner,
+});
+```
+
+Overrides the `partitioner` preset. Confluent ignores this — librdkafka's partitioner is a C-level extension point, not a JS callback.
+
 ### Logger
 
 Pass a `Logger` (the same interface used by `@eventferry/core`) to route the publisher's own diagnostics — driver warnings, hook failures — through your logging stack:

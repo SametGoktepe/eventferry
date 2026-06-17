@@ -54,6 +54,9 @@ export function buildConfluentClientConfig(
   if (opts.transactionTimeoutMs !== undefined) {
     librdkafka["transaction.timeout.ms"] = opts.transactionTimeoutMs;
   }
+  if (opts.compressionLevel !== undefined) {
+    librdkafka["compression.level"] = opts.compressionLevel;
+  }
 
   const tlsRequested = opts.ssl === true || isTlsConfig(opts.ssl);
   const saslRequested = !!opts.sasl;
@@ -94,6 +97,12 @@ export function buildConfluentClientConfig(
     // SASL — kafkajs-compat shape works for both password mechanisms and
     // OAUTHBEARER (the confluent client implements the provider callback).
     kafkaJS["sasl"] = opts.sasl;
+  }
+
+  // Power-user escape hatch — merged LAST so raw keys win against the
+  // translated ones (deliberate; that's the whole point of the hatch).
+  if (opts.rawProducerConfig) {
+    Object.assign(librdkafka, opts.rawProducerConfig);
   }
 
   return { kafkaJS, librdkafka };
