@@ -3,6 +3,7 @@ import { classifyKafkajsError } from "./kafkajs-classifier.js";
 import type {
   KafkaConnectionConfig,
   KafkaDriver,
+  KafkaJsPartitionerChoice,
   ProducerBehaviorConfig,
 } from "./driver.js";
 
@@ -23,10 +24,29 @@ interface KjsTransaction {
 interface KjsKafka {
   producer(args?: unknown): KjsProducer;
 }
+// kafkajs's `Partitioners` namespace: three factory functions; we pluck them
+// at runtime rather than depending on the kafkajs types.
+interface KjsPartitionersNamespace {
+  DefaultPartitioner: () => unknown;
+  LegacyPartitioner: () => unknown;
+  JavaCompatiblePartitioner: () => unknown;
+}
 
 export interface KafkaJsDriverOptions
   extends KafkaConnectionConfig,
     ProducerBehaviorConfig {}
+
+/**
+ * kafkajs producer-level knobs we expose on the typed API that kafkajs does
+ * NOT actually support. On this driver these are warn-and-ignore; users
+ * who need them should switch to the confluent driver.
+ */
+const UNSUPPORTED_BY_KAFKAJS = [
+  "lingerMs",
+  "batchSize",
+  "deliveryTimeoutMs",
+  "maxRequestSize",
+] as const;
 
 /**
  * Driver backed by the pure-JS `kafkajs` client. Simple, zero native deps.
@@ -44,6 +64,7 @@ export class KafkaJsDriver implements KafkaDriver {
         "KafkaJsDriver: transactionalId is required when transactional=true",
       );
     }
+    warnUnsupportedKafkajsOptions(opts);
   }
 
   async connect(): Promise<void> {
@@ -70,10 +91,30 @@ export class KafkaJsDriver implements KafkaDriver {
       // the provider's returned token (other fields are ignored).
       sasl: this.opts.sasl,
     });
+    const createPartitioner = resolveCreatePartitioner(
+      mod.Partitioners,
+      this.opts.partitioner,
+      this.transactional,
+    );
     return kafka.producer({
       idempotent: this.opts.idempotent ?? true,
-      maxInFlightRequests: this.transactional ? 1 : undefined,
-      transactionalId: this.transactional ? this.opts.transactionalId : undefined,
+      // Idempotent / transactional producers cap maxInFlight at 5. When the
+      // user picks transactional we force 1 to keep strict ordering across
+      // retries on classic (non-idempotent) clusters that haven't migrated
+      // to the broker-side fence.
+      maxInFlightRequests: this.transactional
+        ? 1
+        : this.opts.maxInFlightRequests,
+      transactionalId: this.transactional
+        ? this.opts.transactionalId
+        : undefined,
+      // kafkajs accepts these directly when set; undefined falls through to
+      // the kafkajs default.
+      requestTimeout: this.opts.requestTimeoutMs,
+      transactionTimeout: this.opts.transactionTimeoutMs,
+      // Setting any partitioner choice silences kafkajs's
+      // KafkaJSPartitionerNotSpecified warning.
+      createPartitioner,
     });
   }
 
@@ -129,6 +170,11 @@ function groupByTopic(messages: PublishableMessage[], compression?: string) {
       key: m.key,
       value: m.value,
       headers: m.headers,
+      // Per-message partition override. When set, kafkajs routes the record
+      // to this exact partition; when undefined, the configured partitioner
+      // chooses. We keep the key here too because compacted topics need it
+      // even when partition is pinned.
+      ...(m.partition !== undefined ? { partition: m.partition } : {}),
     });
     byTopic.set(m.topic, arr);
   }
@@ -139,7 +185,59 @@ function groupByTopic(messages: PublishableMessage[], compression?: string) {
   }));
 }
 
-async function importKafkaJs(): Promise<{ Kafka: new (cfg: unknown) => KjsKafka }> {
+/**
+ * Resolve the `createPartitioner` factory kafkajs expects on
+ * `producer({...})`. Returns `undefined` to fall through to the kafkajs
+ * default when no choice is made AND the producer is non-transactional
+ * (transactional producers don't trigger the no-partitioner warning).
+ */
+function resolveCreatePartitioner(
+  partitioners: KjsPartitionersNamespace | undefined,
+  choice: KafkaJsPartitionerChoice | undefined,
+  transactional: boolean,
+): (() => unknown) | undefined {
+  if (!partitioners) return undefined;
+  // Default to the java-compatible partitioner when the caller didn't pick.
+  // It matches the Java client (murmur2) and silences the noisy warning;
+  // for transactional producers we leave the kafkajs default alone since
+  // EOS ordering is partitioner-agnostic and the warning doesn't fire there.
+  const effective: KafkaJsPartitionerChoice =
+    choice ?? (transactional ? "default" : "java-compatible");
+  switch (effective) {
+    case "java-compatible":
+      return partitioners.JavaCompatiblePartitioner;
+    case "legacy":
+      return partitioners.LegacyPartitioner;
+    case "default":
+      return partitioners.DefaultPartitioner;
+  }
+}
+
+/** Process-wide dedup so we never warn for the same option twice. */
+const warnedKafkajsKeys = new Set<string>();
+
+function warnUnsupportedKafkajsOptions(opts: KafkaJsDriverOptions): void {
+  for (const key of UNSUPPORTED_BY_KAFKAJS) {
+    if (opts[key] === undefined) continue;
+    if (warnedKafkajsKeys.has(key)) continue;
+    warnedKafkajsKeys.add(key);
+    console.warn(
+      `[@eventferry/kafka] '${key}' is not configurable on the kafkajs driver and was ignored. ` +
+        `Switch to the confluent driver (driver: "confluent") for fine-grained tuning, ` +
+        `or remove the option to silence this warning.`,
+    );
+  }
+}
+
+/** Internal — used by tests. Resets the dedup so warnings can be observed in isolation. */
+export function _resetKafkajsWarnDedup(): void {
+  warnedKafkajsKeys.clear();
+}
+
+async function importKafkaJs(): Promise<{
+  Kafka: new (cfg: unknown) => KjsKafka;
+  Partitioners: KjsPartitionersNamespace;
+}> {
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return (await import("kafkajs")) as any;
