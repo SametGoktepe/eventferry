@@ -1,5 +1,11 @@
 # @eventferry/mysql
 
+## 3.2.0
+
+### Patch Changes
+
+- @eventferry/core@3.2.0
+
 ## 3.1.0
 
 ### Patch Changes
