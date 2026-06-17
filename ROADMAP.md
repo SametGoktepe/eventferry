@@ -300,126 +300,174 @@ This part of the roadmap turns the gap-analysis findings into milestones.
 
 ## Capability matrix — today
 
-| Surface | `@eventferry/kafka@2.0.0` |
+| Surface | `@eventferry/kafka@3.5.0` |
 |---|---|
 | Drivers | `kafkajs` + `@confluentinc/kafka-javascript`, custom-driver injection |
-| Auth | SASL PLAIN / SCRAM-SHA-256 / SCRAM-SHA-512, `ssl: boolean` only |
-| Producer modes | Idempotent (default on), Transactional (EOS), `acks` |
-| Compression | `none` / `gzip` / `snappy` / `lz4` / `zstd` |
-| Delivery | `sendBatch`, per-message `PublishResult { ok, error }` |
-| DLQ | Single-hop routing, basic headers (`dlq-reason`, `dlq-original-topic`, `dlq-failed-at`) |
-| Observability | Relay hooks (`onPublished`, `onFailed`, `onDead`), W3C trace header pass-through |
-| Admin | _(not shipped)_ |
+| Auth | SASL PLAIN / SCRAM-SHA-256 / SCRAM-SHA-512 / OAUTHBEARER, full `TlsConfig` (mTLS, CA pinning, SNI) |
+| AWS MSK IAM | `@eventferry/kafka-iam` package — SigV4-signed OAUTHBEARER with refresh-ahead caching |
+| Producer modes | Idempotent (default on), Transactional (EOS) with callable `transactionalId`, `acks` |
+| Compression | `none` / `gzip` / `snappy` / `lz4` / `zstd` + `compressionLevel` (confluent) |
+| Tuning | `lingerMs`, `batchSize`, `requestTimeoutMs`, `deliveryTimeoutMs`, `maxRequestSize`, `maxInFlightRequests`, `transactionTimeoutMs` |
+| Power-user | `rawProducerConfig` (librdkafka), `rawKafkaJsProducerConfig` (kafkajs), `customPartitioner` (kafkajs) |
+| Delivery | `sendBatch`, per-message `PublishResult { ok, error, errorKind }` |
+| Error classification | `retriable` / `fatal` / `poison` / `backpressure` / `quota` / `fenced` |
+| DLQ | Configurable suffix / topic function, enriched headers (`dlq-reason`, `dlq-error-class`, `dlq-original-topic`, `dlq-failed-at`, `dlq-attempts`, optional `dlq-stack`) |
+| Observability | Publisher + relay hooks, OTel span per batch + W3C `inject`, structured Logger plumbing, librdkafka `onStats` |
+| Admin | `publisher.admin()`, `ensureTopics(specs, { growPartitions })`, `validateTopicsOnConnect` |
+| Health | `publisher.healthCheck({ timeoutMs })` returning `HealthStatus` |
+| Fence recovery | `errorKind: "fenced"` taxonomy + `onProducerFenced` hook + optional `autoRecoverFromFence` |
+| Consumer subpath | `@eventferry/kafka/consume` — `decode(message, { decoder })` + `extractTraceContext(headers)` |
+| Schema Registry | Avro / Protobuf / JSON Schema, three subject strategies, basic + bearer auth, `serializeKey`, `autoRegister` toggle |
 
 ## Release timeline — Kafka adapter
 
 ```mermaid
 timeline
     title eventferry · kafka adapter feature roadmap
-    section ✅ Shipped (2.0.0)
-        Drivers : kafkajs : confluent-kafka-javascript
-        Modes : Idempotent : EOS / transactional : Compression
-        DLQ : Single-hop routing
-    section 🟢 Phase A (2.1.0) — production hardening
+    section ✅ Phase A — production hardening
         Security : mTLS : SASL OAUTHBEARER
         Tuning : linger / batch / timeouts : transaction.timeout.ms
         Observability : OpenTelemetry span : hook surface : logger
-        Reliability : error classification : DLQ enrichment
+        Reliability : error classification : DLQ enrichment : backpressure : quota multiplier
         Partitioning : explicit partition : kafkajs warn fix
         Transactions : abort-on-failure : transactionalId callable
-    section 🟡 Phase B (2.2.0) — broader ecosystem
-        Security : AWS MSK IAM helper : Confluent Cloud OAuth helper
+    section ✅ Phase B — broader ecosystem
+        Security : AWS MSK IAM helper
         Admin : admin() : ensureTopics : validateTopicsOnConnect
-        Serialization : subject strategy : Avro keys : Apicurio adapter
-        Observability : librdkafka stats : Prometheus helper
-        Reliability : quota throttle : backpressure : connection retry
-        Consumer : decode helper : trace-context extract
-    section 🔬 Phase C (2.3.0) — strategic / niche
-        Security : SASL/GSSAPI (Kerberos)
+        Serialization : subject strategy : Avro keys : autoRegister toggle
+        Consumer : decode helper : trace-context extract : tracer.inject
+        Tuning : compressionLevel : rawProducerConfig : customPartitioner
+    section ✅ Phase C — production-grade observability + EOS hardening
+        Observability : librdkafka stats hook : healthCheck()
+        Reliability : producer-fenced restart + autoRecoverFromFence
+        Serialization : Schema Registry auth (basic / bearer)
+        Security : TLS CA + SNI docs
+        Consumer : DLQ recipe : typed registry companion
+    section 🟢 Phase D — planned
+        Reliability : onMessageRetried hook : per-topic retry policy
+        Serialization : compatibility-mode probe : reference schemas
+        Observability : OTel messaging metrics : Prometheus helper
+        Admin : describeAcls probe at startup
+    section 🔬 Demand-gated
+        Security : SASL/GSSAPI (Kerberos) : DELEGATION_TOKEN
+        Serialization : Apicurio Registry : AWS Glue SR
         Multi-cluster : reconfigure() : topicMap : DR playbook
-        Serialization : AWS Glue Schema Registry
-        Admin : full ACL management
-        Observability : health check : OTel messaging metrics
+        Stores : MongoDB : DynamoDB
+        Publishers : NATS : RabbitMQ : Pulsar
 ```
 
-## Phase A — 2.1.0 · production hardening 🟢
+## Phase A — production hardening ✅ Shipped
 
-The "Tier 1 must-ship" items from the gap analysis. Each item is small enough to
-be a single PR; all are **additive** to the public API (no breaking changes).
+The "Tier 1 must-ship" items from the gap analysis. All additive to the public API; no breaking changes.
 
 ### Security · [details](./docs/kafka-gap-analysis/security.md)
-- [ ] **mTLS** — replace `ssl: boolean` with `ssl: boolean | TlsConfig`. `TlsConfig` carries `ca`, `cert`, `key`, `passphrase`, `servername`. Maps to `tls.ConnectionOptions` for kafkajs (Buffer + PEM string both supported); for confluent driver we route Buffer→string and use librdkafka's `ssl.ca.pem` / `ssl.certificate.pem` / `ssl.key.pem` keys (file paths also supported via the `.location` variants). Verified against Redpanda integration test.
-- [ ] **SASL OAUTHBEARER** — add `{ mechanism: "oauthbearer"; oauthBearerProvider: () => Promise<{ value, lifetime?, principal?, extensions? }> }`. Unlocks Azure Event Hubs and any OIDC-fronted cluster. **Driver asymmetry**: kafkajs reads only `value`; confluent **requires** `value + principal + lifetime` and accepts `extensions` — document that cross-driver providers must populate all four to be portable.
+- [x] **mTLS** — `ssl: boolean | TlsConfig`. `TlsConfig` carries `ca`, `cert`, `key`, `passphrase`, `servername`. Maps to `tls.ConnectionOptions` for kafkajs (Buffer + PEM string both supported); for confluent driver we route Buffer→string and use librdkafka's `ssl.ca.pem` / `ssl.certificate.pem` / `ssl.key.pem` keys. Verified against Redpanda integration test.
+- [x] **SASL OAUTHBEARER** — `{ mechanism: "oauthbearer"; oauthBearerProvider: () => Promise<{ value, lifetime?, principal?, extensions? }> }`. Unlocks Azure Event Hubs and any OIDC-fronted cluster. **Driver asymmetry**: kafkajs reads only `value`; confluent **requires** `value + principal + lifetime` and accepts `extensions` — documented in the JSDoc + wiki.
 
 ### Producer tuning · [details](./docs/kafka-gap-analysis/producer-tuning.md)
-- [ ] **Both drivers** — `transactionTimeoutMs`, `requestTimeoutMs`, `maxInFlightRequests` (≤5 when idempotent).
-- [ ] **librdkafka-only** (confluent driver) — `lingerMs`, `batchSize`, `deliveryTimeoutMs`, `maxRequestSize`. kafkajs has no equivalent producer knobs for these (its batching is sticky-partitioner + hardcoded internals). Public API accepts them; on kafkajs they log a one-time warn and are otherwise ignored. Document the driver-choice matrix in README: choose confluent when you need fine-grained tuning.
-- [ ] **Coherence check at construction** — warn when `deliveryTimeoutMs > relayClaimTimeoutMs` (reaper double-publish risk).
+- [x] **Both drivers** — `transactionTimeoutMs`, `requestTimeoutMs`, `maxInFlightRequests` (≤5 when idempotent).
+- [x] **librdkafka-only** (confluent driver) — `lingerMs`, `batchSize`, `deliveryTimeoutMs`, `maxRequestSize`. kafkajs has no equivalent producer knobs for these; public API accepts them and on kafkajs they log a one-time warn and are otherwise ignored. Documented in the kafka README under "Producer tuning".
+- [ ] **Coherence check at construction** — warn when `deliveryTimeoutMs > relayClaimTimeoutMs` (reaper double-publish risk). Deferred to a follow-up — the relay's claim-timeout isn't visible at publisher construction without plumbing.
 
 ### Observability · [details](./docs/kafka-gap-analysis/observability.md)
-- [ ] **OpenTelemetry publish span** — one span per `sendBatch`, named `"{topic} publish"`, `SpanKind.PRODUCER`. Required attrs: `messaging.system=kafka`, `messaging.operation.type=publish`, `messaging.destination.name=<topic>`. Recommended: `messaging.batch.message_count`, `messaging.kafka.partition`, `server.address`/`server.port`. Single span per batch — never per-message (cardinality explosion). Adapter pattern — no OTel dep on us.
-- [ ] **Hook surface** — `onConnect`, `onDisconnect`, `onPublish`, `onError`, `onTransactionAbort` on `KafkaPublisher`.
-- [ ] **Logger passthrough** — accept core's `Logger`; no stray `console.log`.
+- [x] **OpenTelemetry publish span** — one span per `sendBatch`, named `"{topic} publish"`, `SpanKind.PRODUCER`. Attrs: `messaging.system=kafka`, `messaging.operation.type=publish`, `messaging.destination.name=<topic>`, `messaging.batch.message_count`. Single span per batch — never per-message (cardinality explosion). Adapter pattern — no OTel dep on us.
+- [x] **Hook surface** — `onConnect`, `onDisconnect`, `onPublish`, `onError`, `onTransactionAbort` on `KafkaPublisher`.
+- [x] **Logger passthrough** — accepts core's `Logger`; no stray `console.log`.
 
 ### Reliability · [details](./docs/kafka-gap-analysis/reliability.md)
-- [ ] **Error classification** — `PublishResult.errorKind: "retriable" | "fatal" | "poison" | "backpressure" | "quota"`. Core relay reads it for smart retry / DLQ / pause decisions. Starter mapping table for ~20 native error codes per driver is captured in `docs/kafka-gap-analysis/reliability.md`.
-- [ ] **DLQ enrichment** — `dlq-attempts`, `dlq-error-class`, `dlq-original-aggregate-id`, `dlq-original-message-id`, optional truncated `dlq-error-stack`.
-- [ ] **Backpressure surface** — queue-full returns `errorKind: "backpressure"` (librdkafka `ERR__QUEUE_FULL` = -184) instead of bubbling as a generic Error; relay PAUSES instead of burning attempts. Quota-throttle (`ERR_THROTTLING_QUOTA_EXCEEDED` = 89) maps to `errorKind: "quota"` — back off exponentially.
+- [x] **Error classification** — `PublishResult.errorKind: "retriable" | "fatal" | "poison" | "backpressure" | "quota" | "fenced"`. Core relay reads it for smart retry / DLQ / pause decisions. Mapping tables in `kafkajs-classifier.ts` and `confluent-classifier.ts` cover ~40 native error codes per driver.
+- [x] **DLQ enrichment** — `dlq-attempts`, `dlq-error-class`, `dlq-original-topic`, `dlq-failed-at`, optional truncated UTF-8 `dlq-stack`.
+- [x] **Backpressure surface** — queue-full returns `errorKind: "backpressure"` (librdkafka `ERR__QUEUE_FULL` = -184); relay requeues without incrementing attempts.
+- [x] **Quota multiplier** — `errorKind: "quota"` (`THROTTLING_QUOTA_EXCEEDED` = 89) maps to `RetryConfig.quotaMultiplier` × backoff (default 5×).
 
 ### Partitioning · [details](./docs/kafka-gap-analysis/partitioning.md)
-- [ ] **Explicit per-message partition** — `PublishableMessage.partition?: number` override; drivers honor it.
-- [ ] **kafkajs partitioner choice** — `partitioner?: "default" | "legacy" | "java-compatible"` to silence the `KafkaJSPartitionerNotSpecified` warning every greenfield user hits.
+- [x] **Explicit per-message partition** — `PublishableMessage.partition?: number` override; both drivers honor it.
+- [x] **kafkajs partitioner choice** — `partitioner?: "default" | "legacy" | "java-compatible"` silences the `KafkaJSPartitionerNotSpecified` warning. Default `java-compatible` for non-transactional producers.
 
 ### Transactions · [details](./docs/kafka-gap-analysis/transactions-eos.md)
-- [ ] **Abort on send failure inside a tx** — wrap `sendBatch` so a mid-batch throw calls `abortTransaction()` before propagating, preventing pending broker-side transactions until timeout.
-- [ ] **`transactionalId` as a callable** — `() => string | Promise<string>` resolved at connect time, with documented derivation guidance for multi-instance fencing.
+- [x] **Abort on send failure inside a tx** — `sendBatch` calls `abortTransaction()` before propagating a mid-batch throw, preventing pending broker-side transactions until timeout. `onTransactionAbort` hook fires for observability.
+- [x] **`transactionalId` as a callable** — `() => string | Promise<string>` resolved at connect time, with multi-instance EOS guidance documented in the kafka README + wiki.
 
-## Phase B — 2.2.0 · broader ecosystem 🟡
+## Phase B — broader ecosystem ✅ Shipped
 
-The "Tier 2 should-ship" set. Bigger surface or behind Phase A.
+The "Tier 2 should-ship" set plus several Tier 3 items pulled forward when the surface fit cleanly.
 
 ### Security
-- [ ] **AWS MSK IAM helper** — separate `@eventferry/kafka-iam` package wrapping the Phase-A `oauthBearerProvider` with the AWS SigV4 signer; keeps the core package AWS-free.
-- [ ] **Confluent Cloud OAuth helper** — companion doc + provider snippet for SSO-fronted Confluent accounts.
+- [x] **AWS MSK IAM helper** — separate `@eventferry/kafka-iam` package wrapping the Phase-A `oauthBearerProvider` with the AWS SigV4 signer. Process-local token cache with configurable refresh-ahead window (default 60s on the 15-min MSK lifetime), concurrent-refresh dedup, transient-failure recovery. Keeps the core package AWS-free.
 
 ### Producer tuning
-- [ ] **`rawProducerConfig?: Record<string, unknown>`** — typed escape hatch passed through to the active driver. Documented as outside SemVer guarantees.
-- [ ] **`connectionsMaxIdleMs` / `metadataMaxAgeMs`** + **compression level** (per codec, where supported).
+- [x] **`rawProducerConfig`** (librdkafka) and **`rawKafkaJsProducerConfig`** (kafkajs) — typed escape hatches; native keys win against the translated config.
+- [x] **`compressionLevel`** — librdkafka `compression.level` (zstd 1–22 etc.). Confluent only; kafkajs warns + ignores.
+- [ ] **`connectionsMaxIdleMs` / `metadataMaxAgeMs`** — niche; reachable via `rawKafkaJsProducerConfig` today. Typed surface deferred.
 
 ### Admin · [details](./docs/kafka-gap-analysis/admin-operations.md)
-- [ ] **`publisher.admin(): KafkaAdmin`** — typed subset (`listTopics`, `describeTopics`, `createTopics`, `createPartitions`, `describeConfigs`, `alterConfigs`, `describeAcls`).
-- [ ] **`ensureTopics([{ topic, numPartitions, replicationFactor, config }])`** — idempotent topic provisioning helper.
-- [ ] **`validateTopicsOnConnect: boolean`** — fail-fast when configured topics are missing AND the cluster has `auto.create.topics.enable=false`.
+- [x] **`publisher.admin(): KafkaAdmin`** — typed subset shipped: `listTopics`, `describeTopics`, `createTopics`, `createPartitions`. `alterConfigs` / `describeConfigs` / `describeAcls` deferred — reach for the raw driver admin until demand justifies typed wrappers.
+- [x] **`ensureTopics(specs, { growPartitions })`** — idempotent topic provisioning helper. Replication factor + configEntries on EXISTING topics intentionally NOT reconciled (Kafka has no safe in-place alter).
+- [x] **`validateTopicsOnConnect: string[]`** — fail-fast at startup listing every missing topic. Final shape takes a `string[]` rather than a boolean — explicit > magic introspection.
 
 ### Serialization · [details](./docs/kafka-gap-analysis/serialization-schemas.md)
-- [ ] **Subject naming strategy** — `subjectStrategy: "topic" | "record" | "topic_record"` on `SchemaRegistrySerializer`.
-- [ ] **Schema Registry auth surface** — typed basic / bearer config.
-- [ ] **Avro key serialization** — optional `Serializer.serializeKey?(record)`.
-- [ ] **Auto-register policy toggle** — `autoRegister: boolean` with the production recommendation documented.
-- [ ] **Apicurio Registry adapter** — `@eventferry/schema-registry-apicurio` shipping the same `Serializer` interface against Apicurio's REST API.
-
-### Observability
-- [ ] **librdkafka stats hook** — `onStatistics?(stats)` exposing the rich JSON metric stream from the confluent driver.
-- [ ] **Prometheus helper** — optional `@eventferry/kafka/metrics` subpath import wiring hooks to `prom-client`.
-
-### Reliability
-- [ ] **Quota throttle surface** — `errorKind: "quota"` with a longer backoff suggestion.
-- [ ] **Connection retry policy** — `connectionRetry: { initialBackoffMs, maxBackoffMs, maxAttempts }`.
-- [ ] **Poison-pill detection** — encode failures map to `errorKind: "poison"`; skip retries; route straight to DLQ.
-
-### Partitioning
-- [ ] **Custom partitioner support** — `customPartitioner?: (message, partitionCount) => number`.
+- [x] **Subject naming strategy** — `subjectStrategy: "TopicNameStrategy" | "RecordNameStrategy" | "TopicRecordNameStrategy"` + `recordName` resolver + explicit `subject` function override. Legacy single-arg `subject` callable still works.
+- [x] **Avro key serialization** — `keySchemas` option + `serializeKey(record)` method. Returns `null` for keyless records. NOT wired into the relay automatically — application-level convention.
+- [x] **Auto-register policy toggle** — `autoRegister: boolean`. With `false`, always resolves via `getLatestSchemaId`; locally supplied schemas become docs-only.
 
 ### Consumer-side · [details](./docs/kafka-gap-analysis/consumer-side.md)
-- [ ] **`decode` helper** — sub-path import (`@eventferry/kafka/consume`) for round-tripping produced events with metadata + trace context.
-- [ ] **Documented consume recipes** — README section + `defineOutbox` symmetric `events.decode(message)` companion.
+- [x] **`decode` helper** — `@eventferry/kafka/consume` subpath import returning `{ key, value, headers, timestamp, offset, partition }`. Built-in decoders: `json` (default), `utf8`, `none`, or a custom `(bytes) => V`. Tombstones come back as `null` for every decoder.
+- [x] **`extractTraceContext(headers)`** — strict W3C `traceparent` / `tracestate` parse (rejects all-zero IDs, version `ff`, malformed hex). Accepts both raw (Buffer) and decoded (string) header shapes.
+- [x] **`KafkaTracer.inject`** — optional publisher-side hook that writes the W3C trace context into outbound headers. Publisher CLONES each message before invoking inject — caller's `PublishableMessage` reference is never mutated.
 
-## Phase C — 2.3.0 · strategic / niche 🔬
+### Partitioning
+- [x] **Custom partitioner support** — `customPartitioner: () => (args) => number` factory on the kafkajs driver. Confluent ignores (librdkafka's partitioner is a C-level extension point, not a JS callback).
 
-Tier 3 items. Worth knowing about; not blocking adoption.
+## Phase C — production-grade observability + EOS hardening ✅ Shipped
+
+Closes the operational + EOS gaps identified after Phase B's broad-ecosystem rollout. Half-feature, half-doc round.
+
+### Observability
+- [x] **librdkafka stats hook** — `onStats: (stats: LibrdkafkaStats) => void` on the confluent driver. Wraps librdkafka's `stats_cb`, parses the JSON it emits, swallows callback exceptions + parse failures so a misbehaving observer cannot take down the producer loop. `statsIntervalMs` defaults to 30s when the hook is set, OFF otherwise (CPU-billed). kafkajs warns + ignores.
+- [x] **`publisher.healthCheck({ timeoutMs })`** — cheap reachability probe usable as `/healthz` / `/readyz`. Borrows a fresh admin, calls `listTopics`, returns `{ ok, latencyMs, timestamp, error? }`. Default timeout 5_000 ms; `timeoutMs: 0` disables. Always closes the borrowed admin; swallows close errors. Custom drivers without admin return `{ ok: false, error }`. Documented as "broker reachable + auth good", explicitly NOT "publisher fully operational" — a fenced transactional producer would still answer healthy.
+
+### Reliability
+- [x] **Producer-fenced restart** — `PRODUCER_FENCED` and `INVALID_PRODUCER_EPOCH` split out of `"fatal"` into a new `errorKind: "fenced"`. Optional `autoRecoverFromFence: boolean` (default `false`) triggers one transparent `disconnect → connect → re-send` cycle on a fenced batch. Concurrent fenced publishes share a single in-flight reconnect. `onProducerFenced(error)` hook fires regardless of the recovery flag. Multi-instance EOS guidance: leave OFF, use a callable `transactionalId` derived from per-pod runtime context — cross-instance fence is the broker telling the loser to stop.
+
+### Schema Registry
+- [x] **Schema Registry auth surface** — typed `auth?: { type: "basic", username, password } | { type: "bearer", token: string | () => string | Promise<string> }`. Bearer wires a small middleware on the upstream client; callable tokens resolved per request, so rotation lives in the caller's provider. Ignored when an already-constructed `registry` client is injected.
 
 ### Security
-- [ ] **SASL/GSSAPI (Kerberos)** — confluent driver only (kafkajs has no native support).
+- [x] **TLS CA + SNI documentation** — no API change. `TlsConfig.ca` / `.servername` were already on the surface; this round hardened the JSDoc (driver-parity gap: kafkajs honors `servername`, confluent no-ops it) and added README sections for "Dev cluster with a self-signed cert" + "IP-literal brokers (cert hostname mismatch)" with copy-paste examples. `rejectUnauthorized: false` deliberately stays out of the type — TLS verification is non-negotiable.
+
+### Consumer-side
+- [x] **DLQ consumer recipe + typed-event registry companion docs** — root README + kafka README gained `Consuming what eventferry produced` and `Consuming the DLQ` sections showing the canonical `decode → extractTraceContext → defineOutbox(registry).decode` loop and DLQ routing by `dlq-error-class` (rather than parsing `dlq-reason` text). Pure docs — no API change; `defineOutbox(registry).decode()` was already shipped.
+
+### Adversarial integration sweep
+- [x] **Postgres + MySQL bug hunt** — 26 integration tests covering concurrency (no double-claim under load, strict head-of-aggregate ordering), idempotency (markDone twice, empty list, non-existent id), requeue not incrementing attempts, claimBatch hygiene, 1 MB JSON / unicode / emoji / null payload survival, `markFailed` monotonicity, `'dead'` status fencing the reaper. 26/26 pass — no production bugs found.
+
+## Phase D — planned 🟢
+
+Targeted for upcoming releases. Each item is single-PR-sized unless flagged otherwise.
+
+### Reliability
+- [ ] **`onMessageRetried` hook** — fires per per-record retry attempt. Currently only `onFailed(record, err, willRetry)` fires once at failure; observability stacks want a per-retry counter.
+- [ ] **Configurable per-topic retry policy** — `retry: { perTopic: { "orders.created": { maxAttempts: 10 } } }`. Today `retry` is global.
+- [ ] **Coherence check at construction** — warn when `deliveryTimeoutMs > relayClaimTimeoutMs` (carried over from Phase A).
+
+### Serialization
+- [ ] **Compatibility-mode probe** — at `connect()`, verify each configured topic's compatibility mode against the registry and warn if `NONE`. Catches "no schema enforcement" misconfigurations early.
+- [ ] **Reference schema support** — pass-through to upstream for Protobuf nested types; documented examples.
+
+### Observability
+- [ ] **OpenTelemetry messaging metrics** — separate from spans, the new OTel `messaging.client.published.messages` counter. Wait until OTel SDK stabilizes the API.
+- [ ] **Prometheus metrics helper** — small optional package (`@eventferry/kafka-metrics`) registering standard signals as `prom-client` gauges + counters.
+
+### Admin
+- [ ] **`describeAcls` probe at startup** — optional. Verify the configured principal can `Write` on each known topic. Catches silent SASL auth that fails per-record.
+
+## Demand-gated 🔬
+
+We'll build these when someone needs them and is willing to pilot. Open an issue with your use case.
+
+### Security
+- [ ] **SASL/GSSAPI (Kerberos)** — enterprise on-prem only. librdkafka supports it natively, so the work is exposing the right config on the `confluent` driver.
+- [ ] **DELEGATION_TOKEN** — niche, big-platform-only.
 
 ### Multi-cluster · [details](./docs/kafka-gap-analysis/multi-cluster.md)
 - [ ] **`reconfigure(opts)`** — in-place bootstrap swap preserving hooks/serializer.
@@ -427,17 +475,18 @@ Tier 3 items. Worth knowing about; not blocking adoption.
 - [ ] **DR playbook** as a sibling `docs/dr-pattern.md` document.
 
 ### Serialization
+- [ ] **Apicurio Registry adapter** — separate package `@eventferry/schema-registry-apicurio` conforming to the same `Serializer` interface. Real demand from Red Hat shops.
 - [ ] **AWS Glue Schema Registry** — `@eventferry/schema-registry-aws` (different wire format from Confluent's).
 
 ### Admin
-- [ ] **Full ACL management surface** — `createAcls`, `deleteAcls` beyond the Phase-B `describeAcls`.
+- [ ] **Full ACL management surface** — `createAcls`, `deleteAcls`.
 
-### Observability
-- [ ] **Health-check helper** — `publisher.healthCheck()` doing a no-op metadata refresh.
-- [ ] **OpenTelemetry messaging metrics** — once OTel semantic conventions for these stabilize.
+### Stores
+- [ ] **MongoDB** — see [Part 1](#part-1--database-adapter-support).
+- [ ] **DynamoDB** — see [Part 1](#part-1--database-adapter-support).
 
-### Transactions
-- [ ] **Producer-fenced restart auto-handling** — automatic `initTransactions` on reconnect with epoch fencing.
+### Publishers
+- [ ] **NATS / RabbitMQ / Pulsar** — outbox pattern works against any broker. Same `Publisher` interface shape; we'd ship NATS first based on community signal.
 
 ## Cross-cutting — Kafka adapter
 
