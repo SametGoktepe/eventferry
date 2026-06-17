@@ -1,6 +1,29 @@
 packages:
   - "packages/*"
 
+# Transitive dependency overrides — close GitHub Dependabot security alerts
+# without waiting for upstream bumps. Set a MIN version (">=X") so newer
+# upstreams can still float past it. Remove an entry when the source
+# package is updated to pull the patched version on its own.
+#
+# Tracked alerts (as of 2026-06):
+#   undici  → GHSA-vrm6-8vpv-qv8q, -v9p9-hfj2-hcw8, -4992-7rv2-5pvq,
+#             -2mjp-6q6p-2qxm, -g9mf-h72j-4rw9  (testcontainers chain)
+#   uuid    → GHSA-w5hq-g745-h8pq               (testcontainers/dockerode)
+#   ajv     → GHSA-2g4f-4pwh-qvx6               (@kafkajs/confluent-schema-registry)
+#   js-yaml → GHSA-h67p-54hq-rp68               (@changesets/cli)
+#   esbuild → GHSA-g7r4-m6w7-qqqr               (vite/vitest dep — Windows dev-server only)
+#
+# Deprecation overrides (no CVE, just noisy pnpm warnings):
+#   glob    → 10.5.0 deprecated; force ≥11        (archiver/testcontainers chain)
+overrides:
+  undici: ">=6.24.0"
+  uuid: ">=11.1.1"
+  ajv: ">=8.18.0"
+  js-yaml: ">=4.2.0"
+  esbuild: ">=0.28.1"
+  glob: ">=11.0.0"
+
 # pnpm 11 build-script policy (replaces onlyBuiltDependencies/ignoredBuiltDependencies).
 # Every dependency with a lifecycle/postinstall script must be explicitly allowed
 # (true = run its build) or disallowed (false); otherwise a fresh `--frozen-lockfile`
