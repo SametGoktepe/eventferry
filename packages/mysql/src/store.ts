@@ -256,6 +256,23 @@ export class MysqlStore implements OutboxStore {
   }
 
   /**
+   * Re-queue a record to `failed` with the given `retryAt` **without
+   * bumping attempts** — used by the relay for backpressure handling.
+   * Also clears `claimed_at` so the reaper does not race the row.
+   */
+  async requeue(recordId: string, retryAt: Date): Promise<void> {
+    const failed = OUTBOX_STATUS_CODE.failed;
+    await this.pool.query(
+      `UPDATE \`${this.table}\`
+          SET status = ${failed},
+              claimed_at = NULL,
+              next_retry_at = ?
+        WHERE id = ?`,
+      [retryAt, recordId],
+    );
+  }
+
+  /**
    * Delete `done` rows whose `processed_at` is older than `olderThanMs`, in
    * batches (to avoid long locks / table bloat). Returns the total deleted.
    * Run periodically (e.g. from a cron) — there is no built-in scheduler.

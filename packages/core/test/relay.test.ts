@@ -56,6 +56,11 @@ class FakeStore implements OutboxStore {
   ): Promise<void> {
     this.failed.push({ id, retryAt, status });
   }
+
+  requeueCalls: { id: string; retryAt: Date }[] = [];
+  async requeue(id: string, retryAt: Date): Promise<void> {
+    this.requeueCalls.push({ id, retryAt });
+  }
 }
 
 class FakePublisher implements Publisher {
@@ -222,33 +227,142 @@ describe("Relay.tick", () => {
     expect(store.failed[0]?.retryAt).toBeInstanceOf(Date);
   });
 
-  it("backpressure and quota currently retry (backward compat for v2.1)", async () => {
-    // backpressure/quota are reserved categories; in this MVP the relay
-    // treats them like retriable so existing semantics are unchanged. Smarter
-    // handling (pause / longer backoff) lands in a follow-up.
-    const store = new FakeStore([
-      makeRecord({ id: "bp", attempts: 0 }),
-      makeRecord({ id: "qt", attempts: 0 }),
-    ]);
+  it("backpressure re-queues via store.requeue without bumping attempts", async () => {
+    const store = new FakeStore([makeRecord({ id: "bp", attempts: 0 })]);
     const pub = new FakePublisher(
-      new Set(["bp", "qt"]),
-      new Map<string, "backpressure" | "quota">([
-        ["bp", "backpressure"],
-        ["qt", "quota"],
-      ]),
+      new Set(["bp"]),
+      new Map<string, "backpressure">([["bp", "backpressure"]]),
     );
     const relay = new Relay({
       store,
       publisher: pub,
       logger: new NoopLogger(),
-      retry: { maxAttempts: 5, baseMs: 10, maxMs: 100, strategy: "fixed" },
+      retry: {
+        maxAttempts: 5,
+        baseMs: 10,
+        maxMs: 100,
+        strategy: "fixed",
+        backpressureDelayMs: 750,
+      },
     });
 
     await relay.tick();
 
-    expect(store.failed.map((f) => f.status)).toEqual(["failed", "failed"]);
+    // No markFailed (would bump attempts); used the requeue path instead.
+    expect(store.failed).toHaveLength(0);
+    expect(store.requeueCalls).toHaveLength(1);
+    expect(store.requeueCalls[0]?.id).toBe("bp");
+    // retryAt within ~50ms of the configured backpressureDelayMs from now.
+    const now = Date.now();
+    const at = store.requeueCalls[0]!.retryAt.getTime();
+    expect(at - now).toBeGreaterThanOrEqual(700);
+    expect(at - now).toBeLessThanOrEqual(900);
+  });
+
+  it("backpressure falls back to markFailed when store has no requeue method", async () => {
+    const store = new FakeStore([makeRecord({ id: "bp", attempts: 0 })]);
+    // Strip the optional method so we exercise the fallback branch.
+    (store as unknown as { requeue?: unknown }).requeue = undefined;
+    const pub = new FakePublisher(
+      new Set(["bp"]),
+      new Map<string, "backpressure">([["bp", "backpressure"]]),
+    );
+    const relay = new Relay({
+      store,
+      publisher: pub,
+      logger: new NoopLogger(),
+      retry: {
+        maxAttempts: 5,
+        baseMs: 10,
+        maxMs: 100,
+        strategy: "fixed",
+        backpressureDelayMs: 500,
+      },
+    });
+
+    await relay.tick();
+
+    expect(store.failed).toHaveLength(1);
+    expect(store.failed[0]?.status).toBe("failed");
     expect(store.failed[0]?.retryAt).toBeInstanceOf(Date);
-    expect(store.failed[1]?.retryAt).toBeInstanceOf(Date);
+  });
+
+  it("quota stretches the backoff by the configured multiplier and counts as an attempt", async () => {
+    const store = new FakeStore([makeRecord({ id: "qt", attempts: 0 })]);
+    const pub = new FakePublisher(
+      new Set(["qt"]),
+      new Map<string, "quota">([["qt", "quota"]]),
+    );
+    const relay = new Relay({
+      store,
+      publisher: pub,
+      logger: new NoopLogger(),
+      retry: {
+        maxAttempts: 5,
+        baseMs: 100,
+        maxMs: 100, // fixed base of 100ms
+        strategy: "fixed",
+        jitter: false, // make the delay deterministic
+        quotaMultiplier: 10,
+      },
+    });
+
+    await relay.tick();
+
+    // Quota → counted as attempt, scheduled retry via markFailed with longer delay.
+    expect(store.failed).toHaveLength(1);
+    expect(store.failed[0]?.status).toBe("failed");
+    const now = Date.now();
+    const at = store.failed[0]!.retryAt!.getTime();
+    // 100ms base × 10 multiplier = 1000ms; allow ±200ms wiggle for scheduling.
+    expect(at - now).toBeGreaterThanOrEqual(800);
+    expect(at - now).toBeLessThanOrEqual(1200);
+  });
+
+  it("DLQ enrichment: includes attempts, error-class, original aggregate + message id, original topic", async () => {
+    const store = new FakeStore([makeRecord({ id: "x", attempts: 4, aggregateId: "a-99", messageId: "m-77" })]);
+    const pub = new FakePublisher(new Set(["x"]));
+    const relay = new Relay({
+      store,
+      publisher: pub,
+      logger: new NoopLogger(),
+      retry: { maxAttempts: 5, baseMs: 10, maxMs: 100, strategy: "fixed" },
+      dlq: { topic: "t.dlq" },
+    });
+
+    await relay.tick();
+
+    expect(pub.dlq).toHaveLength(1);
+    const headers = pub.dlq[0]!.headers;
+    expect(headers["original-topic"]).toBe("t");
+    expect(headers["dlq-attempts"]).toBe("5");
+    expect(headers["dlq-original-aggregate-id"]).toBe("a-99");
+    expect(headers["dlq-original-message-id"]).toBe("m-77");
+    // No stack trace by default
+    expect(headers["dlq-error-stack"]).toBeUndefined();
+  });
+
+  it("DLQ enrichment: includes truncated stack when opt-in is on", async () => {
+    const store = new FakeStore([makeRecord({ id: "x", attempts: 4 })]);
+    const pub = new FakePublisher(new Set(["x"]));
+    const relay = new Relay({
+      store,
+      publisher: pub,
+      logger: new NoopLogger(),
+      retry: { maxAttempts: 5, baseMs: 10, maxMs: 100, strategy: "fixed" },
+      dlq: {
+        topic: "t.dlq",
+        includeStackTraces: true,
+        maxStackBytes: 200,
+      },
+    });
+
+    await relay.tick();
+
+    const headers = pub.dlq[0]!.headers;
+    expect(headers["dlq-error-stack"]).toBeDefined();
+    expect(Buffer.byteLength(headers["dlq-error-stack"]!, "utf8"))
+      .toBeLessThanOrEqual(200);
   });
 
   it("undefined errorKind retains pre-classification behavior (backward compat)", async () => {
