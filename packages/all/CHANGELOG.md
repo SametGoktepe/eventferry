@@ -1,5 +1,17 @@
 # @eventferry/all
 
+## 4.0.0
+
+### Patch Changes
+
+- Updated dependencies [0208275]
+- Updated dependencies [ae64a98]
+  - @eventferry/kafka@4.0.0
+  - @eventferry/core@4.0.0
+  - @eventferry/mysql@4.0.0
+  - @eventferry/postgres@4.0.0
+  - @eventferry/schema-registry@4.0.0
+
 ## 3.1.0
 
 ### Patch Changes

@@ -1,5 +1,11 @@
 # @eventferry/schema-registry
 
+## 4.0.0
+
+### Patch Changes
+
+- @eventferry/core@4.0.0
+
 ## 3.1.0
 
 ### Patch Changes
