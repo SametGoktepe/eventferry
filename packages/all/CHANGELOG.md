@@ -1,5 +1,21 @@
 # @eventferry/all
 
+## 3.2.5
+
+### Patch Changes
+
+- Updated dependencies [715523f]
+- Updated dependencies [fb0549d]
+- Updated dependencies [08d3384]
+- Updated dependencies [90b69c6]
+- Updated dependencies [ba81a78]
+- Updated dependencies [0f328d2]
+  - @eventferry/core@3.4.0
+  - @eventferry/kafka@3.5.0
+  - @eventferry/schema-registry@3.4.0
+  - @eventferry/mysql@3.3.2
+  - @eventferry/postgres@3.3.2
+
 ## 3.2.4
 
 ### Patch Changes

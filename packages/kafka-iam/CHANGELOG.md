@@ -1,5 +1,16 @@
 # @eventferry/kafka-iam
 
+## 0.2.1
+
+### Patch Changes
+
+- Updated dependencies [715523f]
+- Updated dependencies [fb0549d]
+- Updated dependencies [08d3384]
+- Updated dependencies [90b69c6]
+- Updated dependencies [ba81a78]
+  - @eventferry/kafka@3.5.0
+
 ## 0.2.0
 
 ### Minor Changes
