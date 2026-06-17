@@ -1,4 +1,8 @@
-import type { PublishableMessage, PublishResult } from "@eventferry/core";
+import type {
+  Logger,
+  PublishableMessage,
+  PublishResult,
+} from "@eventferry/core";
 import { classifyKafkajsError } from "./kafkajs-classifier.js";
 import type {
   KafkaConnectionConfig,
@@ -34,7 +38,14 @@ interface KjsPartitionersNamespace {
 
 export interface KafkaJsDriverOptions
   extends KafkaConnectionConfig,
-    ProducerBehaviorConfig {}
+    ProducerBehaviorConfig {
+  /**
+   * Optional logger for the driver's own diagnostics (e.g. warnings about
+   * unsupported tuning options). When absent the driver falls back to
+   * `console.warn` so existing users see the same output.
+   */
+  logger?: Logger;
+}
 
 /**
  * kafkajs producer-level knobs we expose on the typed API that kafkajs does
@@ -221,11 +232,18 @@ function warnUnsupportedKafkajsOptions(opts: KafkaJsDriverOptions): void {
     if (opts[key] === undefined) continue;
     if (warnedKafkajsKeys.has(key)) continue;
     warnedKafkajsKeys.add(key);
-    console.warn(
-      `[@eventferry/kafka] '${key}' is not configurable on the kafkajs driver and was ignored. ` +
-        `Switch to the confluent driver (driver: "confluent") for fine-grained tuning, ` +
-        `or remove the option to silence this warning.`,
-    );
+    const message =
+      `'${key}' is not configurable on the kafkajs driver and was ignored. ` +
+      `Switch to the confluent driver (driver: "confluent") for fine-grained tuning, ` +
+      `or remove the option to silence this warning.`;
+    // Route through the configured logger when present; otherwise fall back
+    // to console.warn so users who never plumbed a logger still see the
+    // diagnostic (matches the prior behavior).
+    if (opts.logger) {
+      opts.logger.warn(`[@eventferry/kafka] ${message}`, { option: key });
+    } else {
+      console.warn(`[@eventferry/kafka] ${message}`);
+    }
   }
 }
 
