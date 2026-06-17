@@ -1,5 +1,12 @@
 # @eventferry/postgres
 
+## 3.1.0
+
+### Patch Changes
+
+- Updated dependencies [da39b08]
+  - @eventferry/core@3.1.0
+
 ## 3.0.0
 
 ### Patch Changes
