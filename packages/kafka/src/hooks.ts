@@ -39,6 +39,18 @@ export interface KafkaPublisherHooks {
    * Useful for observability dashboards that track EOS failure rates.
    */
   onTransactionAbort?(error: Error): void | Promise<void>;
+  /**
+   * Fires when the broker fences this producer — the previous publish
+   * batch reported at least one `errorKind: "fenced"` result. Receives
+   * the first fenced `Error` so dashboards can attribute the incident.
+   *
+   * - When `autoRecoverFromFence` is on, this hook fires BEFORE the
+   *   transparent reconnect attempt. Use it to decrement a transactional
+   *   producer's leader-election counter or warn the operator.
+   * - When `autoRecoverFromFence` is off, the publisher surfaces the
+   *   fenced result unchanged and the hook is still fired for visibility.
+   */
+  onProducerFenced?(error: Error): void | Promise<void>;
 }
 
 /**

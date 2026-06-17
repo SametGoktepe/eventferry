@@ -46,7 +46,7 @@ const CODE_TO_KIND: ReadonlyMap<number, PublishErrorKind> = new Map([
   [-192, "retriable"], // ERR__MSG_TIMED_OUT
   [-195, "retriable"], // ERR__TRANSPORT
   [-198, "poison"], // ERR__BAD_COMPRESSION
-  [-144, "fatal"], // ERR__FENCED — producer fenced by another with same txn id
+  [-144, "fenced"], // ERR__FENCED — producer fenced; publisher reconnect attempts a transparent recovery once
   [-150, "fatal"], // ERR__FATAL — unrecoverable librdkafka error
   [-169, "fatal"], // ERR__AUTHENTICATION
   [-181, "fatal"], // ERR__SSL
@@ -64,7 +64,7 @@ const CODE_TO_KIND: ReadonlyMap<number, PublishErrorKind> = new Map([
   [19, "retriable"], // NOT_ENOUGH_REPLICAS
   [29, "fatal"], // TOPIC_AUTHORIZATION_FAILED
   [31, "fatal"], // CLUSTER_AUTHORIZATION_FAILED
-  [47, "fatal"], // INVALID_PRODUCER_EPOCH
+  [47, "fenced"], // INVALID_PRODUCER_EPOCH — retryable once via publisher reconnect
   [58, "fatal"], // SASL_AUTHENTICATION_FAILED
   [74, "retriable"], // FENCED_LEADER_EPOCH
   [76, "poison"], // UNSUPPORTED_COMPRESSION_TYPE
@@ -75,7 +75,7 @@ const CODE_TO_KIND: ReadonlyMap<number, PublishErrorKind> = new Map([
 /** Symbolic name fallback for clients that surface `err.name` only. */
 const NAME_TO_KIND: ReadonlyMap<string, PublishErrorKind> = new Map([
   ["ERR__QUEUE_FULL", "backpressure"],
-  ["ERR__FENCED", "fatal"],
+  ["ERR__FENCED", "fenced"],
   ["ERR__FATAL", "fatal"],
   ["ERR__AUTHENTICATION", "fatal"],
   ["ERR__SSL", "fatal"],
@@ -84,7 +84,7 @@ const NAME_TO_KIND: ReadonlyMap<string, PublishErrorKind> = new Map([
   ["ERR__BAD_COMPRESSION", "poison"],
   ["ERR_TOPIC_AUTHORIZATION_FAILED", "fatal"],
   ["ERR_CLUSTER_AUTHORIZATION_FAILED", "fatal"],
-  ["ERR_INVALID_PRODUCER_EPOCH", "fatal"],
+  ["ERR_INVALID_PRODUCER_EPOCH", "fenced"],
   ["ERR_SASL_AUTHENTICATION_FAILED", "fatal"],
   ["ERR_CORRUPT_MESSAGE", "poison"],
   ["ERR_MSG_SIZE_TOO_LARGE", "poison"],

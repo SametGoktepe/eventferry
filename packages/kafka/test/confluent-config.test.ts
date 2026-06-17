@@ -219,3 +219,91 @@ describe("buildConfluentClientConfig — rawProducerConfig escape hatch", () => 
     expect(librdkafka).toEqual({});
   });
 });
+
+describe("buildConfluentClientConfig — librdkafka stats hook", () => {
+  it("sets stats_cb + default statistics.interval.ms=30000 when onStats is provided", () => {
+    const { librdkafka } = buildConfluentClientConfig({
+      brokers: ["b:9092"],
+      onStats: () => {},
+    });
+    expect(typeof librdkafka["stats_cb"]).toBe("function");
+    expect(librdkafka["statistics.interval.ms"]).toBe(30_000);
+  });
+
+  it("honors statsIntervalMs override when onStats is set", () => {
+    const { librdkafka } = buildConfluentClientConfig({
+      brokers: ["b:9092"],
+      onStats: () => {},
+      statsIntervalMs: 5_000,
+    });
+    expect(librdkafka["statistics.interval.ms"]).toBe(5_000);
+  });
+
+  it("does NOT enable the stats timer when onStats is absent (CPU-billed)", () => {
+    const { librdkafka } = buildConfluentClientConfig({ brokers: ["b:9092"] });
+    expect(librdkafka["stats_cb"]).toBeUndefined();
+    expect(librdkafka["statistics.interval.ms"]).toBeUndefined();
+  });
+
+  it("statsIntervalMs without onStats still sets the interval (raw client listener escape)", () => {
+    const { librdkafka } = buildConfluentClientConfig({
+      brokers: ["b:9092"],
+      statsIntervalMs: 10_000,
+    });
+    expect(librdkafka["stats_cb"]).toBeUndefined();
+    expect(librdkafka["statistics.interval.ms"]).toBe(10_000);
+  });
+
+  it("rawProducerConfig WINS against the default interval (escape-hatch precedence preserved)", () => {
+    const { librdkafka } = buildConfluentClientConfig({
+      brokers: ["b:9092"],
+      onStats: () => {},
+      rawProducerConfig: { "statistics.interval.ms": 1_000 },
+    });
+    expect(librdkafka["statistics.interval.ms"]).toBe(1_000);
+  });
+
+  it("stats_cb parses the JSON string librdkafka emits and forwards a plain object", () => {
+    const seen: unknown[] = [];
+    const { librdkafka } = buildConfluentClientConfig({
+      brokers: ["b:9092"],
+      onStats: (stats) => seen.push(stats),
+    });
+    const cb = librdkafka["stats_cb"] as (raw: string) => void;
+    cb('{"name":"prod-1","txmsgs":42}');
+    expect(seen[0]).toEqual({ name: "prod-1", txmsgs: 42 });
+  });
+
+  it("stats_cb forwards an already-parsed object untouched (defensive)", () => {
+    const seen: unknown[] = [];
+    const { librdkafka } = buildConfluentClientConfig({
+      brokers: ["b:9092"],
+      onStats: (stats) => seen.push(stats),
+    });
+    const cb = librdkafka["stats_cb"] as (raw: unknown) => void;
+    cb({ already: "parsed" });
+    expect(seen[0]).toEqual({ already: "parsed" });
+  });
+
+  it("stats_cb swallows JSON parse errors (loses one sample, does not crash producer loop)", () => {
+    const seen: unknown[] = [];
+    const { librdkafka } = buildConfluentClientConfig({
+      brokers: ["b:9092"],
+      onStats: (stats) => seen.push(stats),
+    });
+    const cb = librdkafka["stats_cb"] as (raw: string) => void;
+    expect(() => cb("{not json")).not.toThrow();
+    expect(seen).toHaveLength(0);
+  });
+
+  it("stats_cb swallows exceptions thrown by the user callback", () => {
+    const { librdkafka } = buildConfluentClientConfig({
+      brokers: ["b:9092"],
+      onStats: () => {
+        throw new Error("observer is buggy");
+      },
+    });
+    const cb = librdkafka["stats_cb"] as (raw: string) => void;
+    expect(() => cb('{"ok":true}')).not.toThrow();
+  });
+});

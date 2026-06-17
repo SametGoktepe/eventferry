@@ -11,7 +11,7 @@ describe("classifyConfluentError — librdkafka internal codes (negative)", () =
     { code: -192, want: "retriable", label: "ERR__MSG_TIMED_OUT" },
     { code: -195, want: "retriable", label: "ERR__TRANSPORT" },
     { code: -198, want: "poison", label: "ERR__BAD_COMPRESSION" },
-    { code: -144, want: "fatal", label: "ERR__FENCED" },
+    { code: -144, want: "fenced", label: "ERR__FENCED" },
     { code: -150, want: "fatal", label: "ERR__FATAL" },
     { code: -169, want: "fatal", label: "ERR__AUTHENTICATION" },
     { code: -181, want: "fatal", label: "ERR__SSL" },
@@ -33,7 +33,7 @@ describe("classifyConfluentError — wire protocol codes", () => {
     { code: 13, want: "retriable", label: "NETWORK_EXCEPTION" },
     { code: 29, want: "fatal", label: "TOPIC_AUTHORIZATION_FAILED" },
     { code: 31, want: "fatal", label: "CLUSTER_AUTHORIZATION_FAILED" },
-    { code: 47, want: "fatal", label: "INVALID_PRODUCER_EPOCH" },
+    { code: 47, want: "fenced", label: "INVALID_PRODUCER_EPOCH" },
     { code: 58, want: "fatal", label: "SASL_AUTHENTICATION_FAILED" },
     { code: 76, want: "poison", label: "UNSUPPORTED_COMPRESSION_TYPE" },
     { code: 87, want: "poison", label: "INVALID_RECORD" },
@@ -47,7 +47,8 @@ describe("classifyConfluentError — wire protocol codes", () => {
 describe("classifyConfluentError — symbolic name fallback", () => {
   const cases: Array<{ name: string; want: string }> = [
     { name: "ERR__QUEUE_FULL", want: "backpressure" },
-    { name: "ERR__FENCED", want: "fatal" },
+    { name: "ERR__FENCED", want: "fenced" },
+    { name: "ERR_INVALID_PRODUCER_EPOCH", want: "fenced" },
     { name: "ERR__FATAL", want: "fatal" },
     { name: "ERR_TOPIC_AUTHORIZATION_FAILED", want: "fatal" },
     { name: "ERR_MSG_SIZE_TOO_LARGE", want: "poison" },

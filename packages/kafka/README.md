@@ -67,6 +67,40 @@ new KafkaPublisher({
 > non-negotiable. For dev clusters with self-signed certs, pass the cluster
 > CA via `ca` so verification succeeds.
 
+### Dev cluster with a self-signed cert
+
+The right pattern is to pin **your** CA. Verification still happens — just against your CA instead of the system trust store.
+
+```ts
+new KafkaPublisher({
+  brokers: ["dev-broker.internal:9093"],
+  ssl: {
+    ca: readFileSync("/path/to/dev-cluster-ca.pem"),
+    // Cluster reachable via DNS that doesn't match the cert SAN?
+    // Pin the SNI host the cert was issued for:
+    servername: "kafka.dev.internal",
+  },
+});
+```
+
+**Never** add `rejectUnauthorized: false` (TS would reject it anyway — it's not in the type). That disables verification entirely and opens every connection to a man-in-the-middle.
+
+### IP-literal brokers (cert hostname mismatch)
+
+When the broker address is an IP and the cert was issued for a hostname, set `servername`:
+
+```ts
+new KafkaPublisher({
+  brokers: ["10.0.5.12:9093"],          // IP literal
+  ssl: {
+    ca: readFileSync("/etc/ssl/kafka-ca.pem"),
+    servername: "broker.example.com",   // hostname the cert was issued for
+  },
+});
+```
+
+`servername` is honored by the **kafkajs** driver (Node `tls.connect` reads `servername` directly). It's a **documented no-op on the confluent driver** — librdkafka v1.x's kafkaJS-compat layer doesn't expose an SNI override, and SNI is derived from the broker address. Use the kafkajs driver when you need the SNI lever.
+
 ### SASL — username + password (PLAIN / SCRAM)
 
 ```ts
@@ -289,6 +323,107 @@ const tracer: KafkaTracer = {
 
 The publisher clones each outbound message before injecting (the caller's `PublishableMessage` is never mutated, so the relay's retry path stays correct).
 
+## Health check
+
+Cheap reachability probe — useful as the body of a `/healthz` or `/readyz` endpoint:
+
+```ts
+import express from "express";
+const app = express();
+
+app.get("/healthz", async (_req, res) => {
+  const status = await publisher.healthCheck({ timeoutMs: 3_000 });
+  res.status(status.ok ? 200 : 503).json({
+    ok: status.ok,
+    latencyMs: status.latencyMs,
+    error: status.error?.message,
+  });
+});
+```
+
+`publisher.healthCheck()` opens a fresh admin, calls `listTopics`, and returns:
+
+```ts
+interface HealthStatus {
+  ok: boolean;          // broker answered within timeout
+  latencyMs: number;    // probe wall-clock
+  timestamp: number;    // epoch ms when the probe started
+  error?: Error;        // present when ok === false
+}
+```
+
+Default `timeoutMs: 5_000` — long enough to ride out a single broker leader election, short enough to fail a liveness probe meaningfully. Set `timeoutMs: 0` to disable the timer.
+
+**What this proves**: the broker is reachable AND the configured credentials still authenticate. **What this does NOT prove**: the producer's send path is fully operational — a fenced transactional producer would still answer healthy here. Treat the result as "broker reachable + auth still good", not "publisher fully operational".
+
+The borrowed admin is always closed (success or failure). Admin-side close failures don't change the outcome — health checks aren't the place to crash.
+
+## Producer-fenced restart
+
+`PRODUCER_FENCED` and `INVALID_PRODUCER_EPOCH` errors classify as `errorKind: "fenced"` — a distinct kind from `fatal` because some fences are **transient** (broker restart, network partition recovery) rather than a permanent multi-instance collision.
+
+### `autoRecoverFromFence: true`
+
+Opt in to a single transparent reconnect-and-retry when a publish batch reports a fence:
+
+```ts
+new KafkaPublisher({
+  brokers,
+  transactional: true,
+  transactionalId: "orders-publisher",
+  autoRecoverFromFence: true,
+});
+```
+
+What happens on a fenced batch:
+
+1. The `onProducerFenced(error)` hook fires (regardless of the recovery flag — informational).
+2. The driver is disconnected and reconnected (re-running `initTransactions` for transactional producers).
+3. The same batch is resent **once**.
+4. If the second send still reports any fenced record, the publisher gives up and surfaces those failures unchanged — silently retrying again would mask a misconfiguration.
+
+Concurrent fenced publishes share a single in-flight reconnect — the producer is not torn down twice while a recovery is in progress.
+
+**Default is `false`** to preserve the previous "fenced → propagate to relay" behavior. The relay will retry fenced records under the configured backoff and DLQ them when `attempts > retry.maxAttempts`.
+
+### `transactional.id` strategy for multi-instance EOS
+
+When running multiple producer instances against the same logical workload, each instance MUST have a stable, unique `transactionalId`. Use the callable form to derive it from runtime context:
+
+```ts
+new KafkaPublisher({
+  brokers,
+  transactional: true,
+  transactionalId: () => `${process.env.POD_NAME}-${process.env.HOSTNAME}`,
+  // Leave autoRecoverFromFence OFF — a fence means a real collision
+  // worth surfacing.
+});
+```
+
+Cross-instance fence is **not** a transient blip — it's the broker telling one of you that the other is now the canonical producer. Auto-recovery would create a thrashing leadership flip. Keep the option off in multi-instance setups and let the loser instance fail loudly.
+
+## librdkafka stats hook
+
+The confluent driver exposes librdkafka's periodic statistics stream as a typed callback. Useful for piping queue depth, broker latency, broker timeout counts, and per-topic/per-partition counters into your metrics stack.
+
+```ts
+new KafkaPublisher({
+  brokers,
+  driver: "confluent",
+  onStats: (stats) => {
+    // stats is opaque librdkafka JSON. Reach for the fields you care about.
+    promClient.gauge("kafka_msg_cnt").set(stats.msg_cnt as number);
+    promClient.gauge("kafka_txmsgs").set(stats.txmsgs as number);
+  },
+  statsIntervalMs: 30_000, // optional; defaults to 30s when onStats is set
+});
+```
+
+- **`onStats`** receives the librdkafka stats JSON, already parsed to a plain object. The schema is opaque (`Record<string, unknown>`) — librdkafka's stats are huge and evolve across versions. Reference: [librdkafka STATISTICS.md](https://github.com/confluentinc/librdkafka/blob/master/STATISTICS.md).
+- **`statsIntervalMs`** maps to librdkafka's `statistics.interval.ms`. **Defaults to 30000 ms when `onStats` is set; otherwise stays off** (librdkafka CPU-bills the JSON serialization every tick — we don't enable it silently).
+- The wrapper swallows callback exceptions and JSON parse failures — a single dropped sample is preferable to taking down the producer's event loop.
+- **No-op on the kafkajs driver** — kafkajs has no equivalent surface. Logs a one-time warning and ignores both options.
+
 ## Power-user escape hatches
 
 When the high-level options don't reach a knob you need, drop down to the native client config.
@@ -454,6 +589,50 @@ await consumer.run({
 - `decoder: (bytes) => …` — custom (Avro, Protobuf, MessagePack, …).
 
 `extractTraceContext` returns `null` if no `traceparent` header is present or it fails W3C validation (all-zero IDs, `version: ff`, malformed hex). It accepts both raw consumer headers (Buffer values) and already-decoded headers (string values).
+
+#### Typed payload via the producer-side registry
+
+When your consumer lives in the same monorepo as the producer, hand the decoded bytes to the **same `defineOutbox(registry)`** you used to enqueue. `decode` validates against the topic's Standard Schema and returns the typed payload:
+
+```ts
+import { defineOutbox } from "@eventferry/core";
+import { decode } from "@eventferry/kafka/consume";
+import { registry } from "./outbox-registry";
+
+const events = defineOutbox(registry); // no store — consumer side
+
+await consumer.run({
+  eachMessage: async ({ message }) => {
+    const m = decode(message, { decoder: "utf8" });
+    const event = await events.decode("orders.created", m.value!);
+    //    ^? { orderId: string; total: number }
+    await handle(event);
+  },
+});
+```
+
+`events.decode(topic, bytes)` throws `OutboxValidationError` if the topic isn't in the registry or the payload doesn't match the schema. Cross-language consumers (Go, Java, Python) skip the companion and use their own schema tooling — Confluent Schema Registry for typed wire formats.
+
+#### DLQ recipe
+
+Records that exhaust retries land on `${topic}.dlq` (or your configured DLQ topic) carrying enriched headers `dlq-reason`, `dlq-error-class`, `dlq-original-topic`, `dlq-failed-at`, `dlq-attempts` (and optionally `dlq-stack` when you opt in). Route them with `dlq-error-class` rather than parsing `dlq-reason`:
+
+```ts
+await dlqConsumer.run({
+  eachMessage: async ({ message }) => {
+    const m = decode(message);
+    const errClass = m.headers["dlq-error-class"];
+    if (errClass === "KafkaJSProtocolError" && m.headers["dlq-reason"]?.includes("MESSAGE_TOO_LARGE")) {
+      await ticket.create({ title: `Oversized DLQ from ${m.headers["dlq-original-topic"]}` });
+    } else {
+      await retryQueue.put({
+        payload: m.value,
+        attemptsSoFar: Number(m.headers["dlq-attempts"] ?? "0"),
+      });
+    }
+  },
+});
+```
 
 ### `validateTopicsOnConnect`
 

@@ -332,6 +332,75 @@ new PostgresStore({
 });
 ```
 
+### Consuming what eventferry produced
+
+eventferry is publisher-only — your consumer is whatever you already use (kafkajs, `@confluentinc/kafka-javascript`, KafkaJS rebroadcast, Faust, …). Two helpers make the consumer side ergonomic:
+
+- `decode(message, { decoder })` from `@eventferry/kafka/consume` normalizes the raw message shape (key, value, headers, offset, timestamp, partition) both kafkajs and confluent deliver. Built-in decoders: `json` (default), `utf8`, `none`, or a custom `(bytes) => V`.
+- `extractTraceContext(headers)` parses the W3C `traceparent` / `tracestate` headers your relay's tracing wrote at enqueue, so you can start a CONSUMER span as the child of the producer's span.
+- `defineOutbox(registry).decode(topic, bytes)` from `@eventferry/core` — the **same registry** you used to enqueue, used in reverse: JSON-parse + validate + return the typed payload. Throws `OutboxValidationError` if the topic is unknown or the payload doesn't match the schema. Use this when the consumer lives in the same monorepo as the producer.
+
+```ts
+import { Kafka } from "kafkajs";
+import { decode, extractTraceContext } from "@eventferry/kafka/consume";
+import { defineOutbox } from "@eventferry/core";
+import { registry } from "./outbox-registry";
+
+const events = defineOutbox(registry);                // no store — consumer side
+const consumer = new Kafka({ brokers }).consumer({ groupId: "orders-worker" });
+await consumer.connect();
+await consumer.subscribe({ topic: "orders.created" });
+
+await consumer.run({
+  eachMessage: async ({ message }) => {
+    // 1) Normalize the raw kafkajs/confluent shape.
+    const m = decode(message, { decoder: "utf8" });
+    // 2) Continue the W3C trace context the producer wrote (optional).
+    const trace = extractTraceContext(message.headers);
+    if (trace) startConsumerSpan(trace.traceId, trace.spanId);
+    // 3) Typed + validated payload via the same registry as the producer.
+    const event = await events.decode("orders.created", m.value!);
+    //    ^? { orderId: string; total: number }
+    await handle(event);
+  },
+});
+```
+
+### Consuming the DLQ
+
+When a record exhausts `retry.maxAttempts` (or hits a `fatal` / `poison` error), the relay calls `publishToDlq` and the message lands on `${topic}.dlq` (or your configured DLQ topic) carrying enriched headers:
+
+- `dlq-reason` — `error.message`
+- `dlq-error-class` — `KafkaJSProtocolError`, `RecordTooLargeException`, …
+- `dlq-error-class` is good for **alert routing** without parsing the reason string
+- `dlq-original-topic` — the topic this record was originally destined for
+- `dlq-failed-at` — ISO timestamp
+- `dlq-attempts` — how many tries the relay made before giving up
+- `dlq-stack` (optional, opt-in) — truncated UTF-8 stack
+
+Minimal DLQ consumer:
+
+```ts
+const dlqConsumer = new Kafka({ brokers }).consumer({ groupId: "dlq-handler" });
+await dlqConsumer.subscribe({ topic: "orders.created.dlq" });
+
+await dlqConsumer.run({
+  eachMessage: async ({ message }) => {
+    const m = decode(message);
+    const reason = m.headers["dlq-reason"];
+    const errClass = m.headers["dlq-error-class"];
+    const failedAt = m.headers["dlq-failed-at"];
+
+    // Route poison records to a human queue; quota / transient to a retry queue, etc.
+    if (errClass === "KafkaJSProtocolError" && reason?.includes("MESSAGE_TOO_LARGE")) {
+      await ticket.create({ title: `Oversized DLQ record from ${m.headers["dlq-original-topic"]}`, body: reason });
+    } else {
+      await retryQueue.put({ payload: m.value, attemptsSoFar: Number(m.headers["dlq-attempts"] ?? "0") });
+    }
+  },
+});
+```
+
 ### Observability
 
 ```ts

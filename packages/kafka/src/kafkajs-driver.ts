@@ -102,6 +102,9 @@ const UNSUPPORTED_BY_KAFKAJS = [
   // Confluent-only escape hatches; ignored on kafkajs.
   "compressionLevel",
   "rawProducerConfig",
+  // librdkafka stats — kafkajs has no equivalent surface.
+  "onStats",
+  "statsIntervalMs",
 ] as const;
 
 /**

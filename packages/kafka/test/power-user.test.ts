@@ -95,4 +95,11 @@ describe("KafkaJsDriver — kafkajs warns on confluent-only options", () => {
     expect(spy).toHaveBeenCalledTimes(1);
     expect(spy.mock.calls[0]?.[0]).toMatch(/rawProducerConfig/);
   });
+
+  it("warns when onStats is set on kafkajs (no equivalent surface)", () => {
+    const spy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    new KafkaJsDriver({ brokers: ["b:9092"], onStats: () => {} });
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy.mock.calls[0]?.[0]).toMatch(/onStats/);
+  });
 });

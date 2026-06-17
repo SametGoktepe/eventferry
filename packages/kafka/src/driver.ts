@@ -40,7 +40,20 @@ export interface KafkaDriver {
  * TLS using the driver's default trust store).
  *
  * `rejectUnauthorized` is intentionally NOT a knob here — TLS verification is
- * non-negotiable. Dev clusters with self-signed certs pass their CA via `ca`.
+ * non-negotiable. Dev clusters with self-signed certs MUST pass their CA via
+ * `ca` (validation still happens, against your CA instead of the system
+ * trust store). If the broker is addressed by an IP literal or a hostname
+ * that doesn't match the cert SAN, set `servername` to the hostname the
+ * cert was issued for so SNI + verification align.
+ *
+ * **Driver parity:**
+ * - `ca`, `cert`, `key`, `passphrase` work on both kafkajs and confluent.
+ * - `servername` is honored by **kafkajs** (Node `tls.connect` reads
+ *   `servername` directly). On the **confluent** driver it's a documented
+ *   no-op — librdkafka derives SNI from the broker address and v1.x's
+ *   kafkaJS-compat layer does not surface an override. Use the kafkajs
+ *   driver for clusters where you need the SNI lever, or wait for
+ *   librdkafka to expose it.
  */
 export interface TlsConfig {
   /** PEM-encoded CA bundle. Buffers and strings both accepted. */
@@ -51,7 +64,13 @@ export interface TlsConfig {
   key?: string | Buffer;
   /** Passphrase for an encrypted private key. */
   passphrase?: string;
-  /** SNI host. Useful when broker address doesn't match the cert SAN. */
+  /**
+   * SNI host. Set this when the broker address (e.g. an IP literal or an
+   * internal DNS name) does NOT match the certificate's Subject
+   * Alternative Names. Honored on the kafkajs driver; no-op on the
+   * confluent driver (librdkafka does not expose an SNI override at
+   * v1.x).
+   */
   servername?: string;
 }
 
@@ -275,6 +294,40 @@ export interface ProducerBehaviorConfig {
    * extension point, not a JS callback.
    */
   customPartitioner?: () => (args: unknown) => number;
+  /**
+   * (confluent only) Periodic librdkafka statistics callback. When set,
+   * eventferry wires `stats_cb` on the underlying producer and parses the
+   * JSON payload librdkafka emits every {@link statsIntervalMs} ms.
+   *
+   * The shape is intentionally opaque — librdkafka's stats schema is huge
+   * (txmsgs, rxbytes, queue depth, broker timeouts, per-topic / per-partition
+   * counters…) and evolves across versions. Documented at
+   * https://github.com/confluentinc/librdkafka/blob/master/STATISTICS.md.
+   * Cast to your own narrower type if you're consuming a known subset.
+   *
+   * No-op on the kafkajs driver — kafkajs has no equivalent surface.
+   * Pair with {@link statsIntervalMs} (defaults to 30000 ms when this hook
+   * is set but `rawProducerConfig['statistics.interval.ms']` isn't).
+   */
+  onStats?: (stats: LibrdkafkaStats) => void;
+  /**
+   * (confluent only) Override the polling interval the librdkafka stats
+   * callback fires at. Maps to `statistics.interval.ms`. Defaults to
+   * 30000 ms when {@link onStats} is set; defaults to 0 (disabled)
+   * otherwise — librdkafka spends CPU on this and we don't want to enable
+   * it silently. Set to 0 to suppress emission while keeping the hook
+   * defined (useful for tests).
+   */
+  statsIntervalMs?: number;
 }
+
+/**
+ * Opaque envelope for librdkafka's stats JSON. The schema is
+ * version-specific and large; eventferry surfaces it untyped so you can
+ * cast to whatever subset you care about.
+ *
+ * Reference: https://github.com/confluentinc/librdkafka/blob/master/STATISTICS.md
+ */
+export type LibrdkafkaStats = Record<string, unknown>;
 
 export type DriverKind = "kafkajs" | "confluent";

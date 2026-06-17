@@ -26,6 +26,30 @@ export type SubjectNameStrategy =
   | "TopicRecordNameStrategy";
 
 /**
+ * Authentication for the Schema Registry HTTP API.
+ *
+ * - `"basic"` — HTTP Basic Auth. The shape Confluent Cloud and most
+ *   commercial registries use; passed straight through to the underlying
+ *   client's `auth` config.
+ * - `"bearer"` — `Authorization: Bearer <token>` header. The `token`
+ *   field accepts either a static string OR a callable that resolves a
+ *   fresh token on every request (cache inside your callable to amortise
+ *   cost; we don't memoize for you, so OAuth refresh-loop logic lives
+ *   on your side).
+ *
+ * mTLS for the registry connection itself is handled by Node's `tls`
+ * stack — supply a custom `https.Agent` via the upstream client's
+ * `agent` option (use the `registry` injection here and configure it
+ * yourself), separate from the broker TLS the publisher uses.
+ */
+export type SchemaRegistryAuth =
+  | { type: "basic"; username: string; password: string }
+  | {
+      type: "bearer";
+      token: string | (() => string | Promise<string>);
+    };
+
+/**
  * The subset of a Confluent Schema Registry client this serializer uses. The
  * `@kafkajs/confluent-schema-registry` `SchemaRegistry` satisfies it structurally.
  */
@@ -43,6 +67,13 @@ export interface SchemaRegistrySerializerOptions {
   registry?: SchemaRegistryClient;
   /** Or construct one from a host (requires @kafkajs/confluent-schema-registry). */
   host?: string;
+  /**
+   * Optional authentication for the Schema Registry HTTP API. See
+   * {@link SchemaRegistryAuth} for the two supported shapes. Ignored
+   * when `registry` is provided (configure auth on the injected client
+   * yourself in that case).
+   */
+  auth?: SchemaRegistryAuth;
   /** Per-topic VALUE schema to register. Topics omitted here use the subject's latest. */
   schemas?: Record<string, SchemaSpec>;
   /**
@@ -117,6 +148,7 @@ export class SchemaRegistrySerializer implements Serializer {
     | ((topic: string, isKey?: boolean, record?: OutboxRecord) => string)
     | null;
   private readonly host: string | null;
+  private readonly auth: SchemaRegistryAuth | null;
   private readonly autoRegister: boolean;
   // Keyed by `${topic}:${isKey}` to keep value- and key-subject ids distinct.
   private readonly idCache = new Map<string, Promise<number>>();
@@ -130,6 +162,7 @@ export class SchemaRegistrySerializer implements Serializer {
     }
     this.registry = opts.registry ?? null;
     this.host = opts.host ?? null;
+    this.auth = opts.auth ?? null;
     this.schemas = opts.schemas ?? {};
     this.keySchemas = opts.keySchemas ?? {};
     this.subjectStrategy = opts.subjectStrategy ?? "TopicNameStrategy";
@@ -227,13 +260,72 @@ export class SchemaRegistrySerializer implements Serializer {
   private async getRegistry(): Promise<SchemaRegistryClient> {
     if (this.registry) return this.registry;
     const mod = await importSchemaRegistry();
-    this.registry = new mod.SchemaRegistry({ host: this.host as string });
+    const cfg: SchemaRegistryConstructorConfig = {
+      host: this.host as string,
+    };
+    if (this.auth) {
+      if (this.auth.type === "basic") {
+        // Confluent SR client accepts `auth: { username, password }`
+        // and the mappersmith basic-auth middleware builds the header.
+        cfg.auth = {
+          username: this.auth.username,
+          password: this.auth.password,
+        };
+      } else {
+        // Bearer: SR doesn't ship a built-in middleware. Inject our own
+        // so every API call carries `Authorization: Bearer <token>`.
+        cfg.middlewares = [bearerAuthMiddleware(this.auth.token)];
+      }
+    }
+    this.registry = new mod.SchemaRegistry(cfg);
     return this.registry;
   }
 }
 
+/**
+ * Mappersmith middleware shape — the structural subset the Confluent
+ * SR client passes through. We don't depend on mappersmith types
+ * directly so the package compiles without the optional peer installed.
+ */
+interface MmRequest {
+  enhance(args: { headers?: Record<string, string> }): MmRequest;
+}
+
+/**
+ * Build a mappersmith middleware that adds `Authorization: Bearer <token>`.
+ *
+ * Exported for testing only — not part of the public API surface. The
+ * middleware resolves the token on EVERY request, so callable token
+ * providers can rotate without re-constructing the serializer. Cache
+ * inside your provider if rotation cost matters.
+ */
+export function bearerAuthMiddleware(
+  token: string | (() => string | Promise<string>),
+) {
+  return () => ({
+    async prepareRequest(next: () => Promise<MmRequest>): Promise<MmRequest> {
+      const request = await next();
+      const value = typeof token === "function" ? await token() : token;
+      return request.enhance({ headers: { Authorization: `Bearer ${value}` } });
+    },
+  });
+}
+
+/**
+ * Structural shape the SR client's constructor accepts. Mirrors
+ * `SchemaRegistryAPIClientArgs` from the upstream package without
+ * importing the type directly (optional peer).
+ */
+interface SchemaRegistryConstructorConfig {
+  host: string;
+  auth?: { username: string; password: string };
+  middlewares?: Array<() => unknown>;
+}
+
 async function importSchemaRegistry(): Promise<{
-  SchemaRegistry: new (cfg: { host: string }) => SchemaRegistryClient;
+  SchemaRegistry: new (
+    cfg: SchemaRegistryConstructorConfig,
+  ) => SchemaRegistryClient;
 }> {
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

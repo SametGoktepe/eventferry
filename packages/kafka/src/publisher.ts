@@ -60,6 +60,32 @@ export interface KafkaPublisherOptions
    * fire. Driver must implement `admin()` (the built-ins do).
    */
   validateTopicsOnConnect?: string[];
+  /**
+   * Transparently recover from a producer-fence error. When set to `true`,
+   * a `publish()` call whose batch comes back with at least one
+   * `errorKind: "fenced"` result triggers ONE round of:
+   *
+   *   1. disconnect the driver
+   *   2. connect it again (re-running `initTransactions` for transactional producers)
+   *   3. re-send the same batch
+   *
+   * If the second send still produces a fenced result, the publisher gives
+   * up and surfaces the failures unchanged — at that point the fence is
+   * almost certainly caused by another instance taking the same
+   * `transactionalId`, and silently retrying again would mask the
+   * misconfiguration.
+   *
+   * Default `false` to preserve the previous "fenced → fatal" semantics.
+   * Turn it on when running a single producer instance against transient
+   * brokers (rolling restarts, network blips) where a fence is usually
+   * just a transient epoch mismatch.
+   *
+   * For MULTI-INSTANCE EOS, leave this OFF and use a callable
+   * `transactionalId` derived from per-instance context (pod name, k8s
+   * ordinal, AZ + replica index) so each instance has a stable, unique
+   * id — fences will then correctly stop the loser instance.
+   */
+  autoRecoverFromFence?: boolean;
 }
 
 /**
@@ -74,6 +100,11 @@ export class KafkaPublisher implements Publisher {
   private readonly hooks: KafkaPublisherHooks;
   private readonly tracer: KafkaTracer;
   private readonly validateTopicsOnConnect: readonly string[] | undefined;
+  private readonly autoRecoverFromFence: boolean;
+  // Serialize reconnects so concurrent publish() calls hitting a fence
+  // all observe the same single reconnect attempt — the second publish
+  // doesn't try to disconnect a producer the first is still re-initing.
+  private fenceRecovery: Promise<void> | null = null;
 
   constructor(opts: KafkaPublisherOptions) {
     this.logger = opts.logger;
@@ -82,6 +113,7 @@ export class KafkaPublisher implements Publisher {
     this.validateTopicsOnConnect = opts.validateTopicsOnConnect
       ? Object.freeze([...opts.validateTopicsOnConnect])
       : undefined;
+    this.autoRecoverFromFence = opts.autoRecoverFromFence ?? false;
     // Plumb the logger into driver construction so driver-side diagnostics
     // (e.g. kafkajs unsupported-tuning warnings) route through it too.
     // Plumb a safe-wrapped onTransactionAbort callback so the driver-level
@@ -231,6 +263,24 @@ export class KafkaPublisher implements Publisher {
       throw err;
     }
 
+    // Fence detection + transparent single-shot recovery. Runs BEFORE the
+    // per-record hooks so observers see a clean "all ok" path when the
+    // retry succeeds — they only see the fence error if the second attempt
+    // also fails. Fires the onProducerFenced hook regardless of whether
+    // auto-recovery is enabled (informational signal).
+    const firstFenced = results.find(
+      (r) => !r.ok && r.errorKind === "fenced",
+    );
+    if (firstFenced) {
+      const fenceErr = firstFenced.error ?? new Error("producer fenced");
+      await safeHook(this.logger, "onProducerFenced", () =>
+        this.hooks.onProducerFenced?.(fenceErr),
+      );
+      if (this.autoRecoverFromFence) {
+        results = await this.recoverAndRetry(outgoing, results);
+      }
+    }
+
     // Per-record hooks. Walk by index so the original message is available.
     const byId = new Map(messages.map((m) => [m.recordId, m]));
     let allOk = true;
@@ -283,6 +333,123 @@ export class KafkaPublisher implements Publisher {
   }
 
   /**
+   * Cheap reachability probe. Borrows a fresh admin client, calls
+   * `listTopics`, and returns timing + outcome. Useful as the body of a
+   * `/healthz` or `/readyz` endpoint — proves the broker is reachable
+   * AND that the configured credentials still authenticate against it,
+   * without writing a record.
+   *
+   * Does NOT exercise the producer's send path — a healthy admin
+   * connection doesn't guarantee `publish()` will succeed (a fenced
+   * transactional producer would still answer healthy here). Treat this
+   * as "broker reachable + auth still good", not "publisher is fully
+   * operational".
+   *
+   * Default timeout 5_000 ms — long enough to ride out a single broker
+   * leader election, short enough to fail a liveness probe meaningfully.
+   * Set `timeoutMs: 0` to disable the timer entirely.
+   *
+   * The driver must implement `admin()` (the built-ins do); custom
+   * drivers without admin get `{ ok: false, error: ... }` instead of
+   * the throw `publisher.admin()` would surface — health checks are
+   * not the place to crash.
+   */
+  async healthCheck(opts: { timeoutMs?: number } = {}): Promise<HealthStatus> {
+    const timeoutMs = opts.timeoutMs ?? 5_000;
+    const startedAt = Date.now();
+    if (!this.driver.admin) {
+      return {
+        ok: false,
+        latencyMs: 0,
+        timestamp: startedAt,
+        error: new Error(
+          "KafkaPublisher.healthCheck: configured driver does not implement admin()",
+        ),
+      };
+    }
+    let admin: KafkaDriverAdmin | null = null;
+    try {
+      admin = await this.driver.admin();
+      await admin.connect();
+      const probe = admin.listTopics();
+      // Race the probe against the timeout so a hung admin can't pin the
+      // health check indefinitely. `timeoutMs: 0` opts out cleanly.
+      if (timeoutMs > 0) {
+        await raceWithTimeout(probe, timeoutMs, "healthCheck");
+      } else {
+        await probe;
+      }
+      return {
+        ok: true,
+        latencyMs: Date.now() - startedAt,
+        timestamp: startedAt,
+      };
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      return {
+        ok: false,
+        latencyMs: Date.now() - startedAt,
+        timestamp: startedAt,
+        error,
+      };
+    } finally {
+      // Best-effort close; admin already lost is fine, swallow.
+      try {
+        await admin?.close();
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  /**
+   * Disconnect + re-connect the driver and re-send the batch ONCE. Used
+   * by the fence-recovery path. Concurrent fence recoveries dedupe on a
+   * shared in-flight promise (`fenceRecovery`) so we don't tear the
+   * producer down while another batch is mid-restart.
+   *
+   * If the second send STILL reports any fenced records, those failures
+   * are returned unchanged — another instance has almost certainly taken
+   * the same `transactionalId` and silently retrying again would mask
+   * the misconfiguration.
+   */
+  private async recoverAndRetry(
+    outgoing: PublishableMessage[],
+    firstResults: PublishResult[],
+  ): Promise<PublishResult[]> {
+    if (!this.fenceRecovery) {
+      this.fenceRecovery = (async () => {
+        try {
+          await this.driver.disconnect();
+          await this.driver.connect();
+        } finally {
+          // Clear the slot so a SUBSEQUENT fence can attempt recovery
+          // again — recoveries are per-incident, not per-process.
+          this.fenceRecovery = null;
+        }
+      })();
+    }
+    try {
+      await this.fenceRecovery;
+    } catch (err) {
+      // Reconnect itself failed — surface the original fence result so
+      // the relay can DLQ + alert. The reconnect error is informational.
+      const reconnectErr =
+        err instanceof Error ? err : new Error(String(err));
+      await safeHook(this.logger, "onError", () =>
+        this.hooks.onError?.(reconnectErr),
+      );
+      return firstResults;
+    }
+    try {
+      return await this.driver.sendBatch(outgoing);
+    } catch {
+      // Driver threw on the second attempt — surface original fence results.
+      return firstResults;
+    }
+  }
+
+  /**
    * Start a span for the batch following the OTel messaging conventions.
    *
    * Multi-topic batches: per the OTel spec, the span name uses the
@@ -299,6 +466,54 @@ export class KafkaPublisher implements Publisher {
       "messaging.batch.message_count": messages.length,
     });
   }
+}
+
+/**
+ * Outcome of a {@link KafkaPublisher.healthCheck} call. Shape is stable
+ * and small so consumers (HTTP /healthz, k8s probes, Datadog) can
+ * marshal it without a translation layer.
+ */
+export interface HealthStatus {
+  /** True when the broker answered within the timeout window. */
+  ok: boolean;
+  /** Wall-clock milliseconds spent on the probe (admin connect + listTopics). */
+  latencyMs: number;
+  /** Epoch ms when the probe started — handy for log correlation. */
+  timestamp: number;
+  /** Present only when `ok === false`. The classified error, untouched. */
+  error?: Error;
+}
+
+/**
+ * Resolve when `p` resolves; reject with a labelled `TimeoutError` if
+ * the timer fires first. The original promise keeps running — we cannot
+ * cancel an in-flight admin call from here — but its outcome is
+ * ignored by the caller. The unref keeps the timer from holding the
+ * Node event loop open in CLI contexts.
+ */
+function raceWithTimeout<T>(
+  p: Promise<T>,
+  ms: number,
+  label: string,
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${ms}ms`));
+    }, ms);
+    if (typeof (timer as { unref?: () => void }).unref === "function") {
+      (timer as { unref: () => void }).unref();
+    }
+    p.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      },
+    );
+  });
 }
 
 function selectDriver(opts: KafkaPublisherOptions): KafkaDriver {
