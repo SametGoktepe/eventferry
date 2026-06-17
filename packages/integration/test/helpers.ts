@@ -43,6 +43,28 @@ export function newMysqlPool(): mysql.Pool {
   });
 }
 
+export function mariadbInfo(): MysqlConnectionInfo {
+  const host = process.env.MARIADB_HOST;
+  const port = process.env.MARIADB_PORT;
+  const user = process.env.MARIADB_USER;
+  const password = process.env.MARIADB_PASSWORD;
+  const database = process.env.MARIADB_DATABASE;
+  if (!host || !port || !user || !password || !database) {
+    throw new Error("MARIADB_* env vars not set (global setup did not run?)");
+  }
+  return { host, port: Number(port), user, password, database };
+}
+
+export function newMariadbPool(): mysql.Pool {
+  // Same `mysql2` driver — MariaDB speaks the MySQL wire protocol.
+  return mysql.createPool({
+    ...mariadbInfo(),
+    supportBigNumbers: true,
+    bigNumberStrings: true,
+    dateStrings: false,
+  });
+}
+
 export function brokers(): string[] {
   const b = process.env.KAFKA_BROKERS;
   if (!b) throw new Error("KAFKA_BROKERS not set");

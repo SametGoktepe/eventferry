@@ -10,9 +10,15 @@ import {
   RedpandaContainer,
   type StartedRedpandaContainer,
 } from "@testcontainers/redpanda";
+import {
+  GenericContainer,
+  Wait,
+  type StartedTestContainer,
+} from "testcontainers";
 
 let pg: StartedPostgreSqlContainer | undefined;
 let mysql: StartedMySqlContainer | undefined;
+let mariadb: StartedTestContainer | undefined;
 let redpanda: StartedRedpandaContainer | undefined;
 
 export async function setup(): Promise<void> {
@@ -69,6 +75,25 @@ export async function setup(): Promise<void> {
     .withStartupTimeout(180_000)
     .start();
 
+  // MariaDB 10.11 (LTS) — same `MysqlStore` code, different engine. The
+  // mariadb image takes MARIADB_* env vars; auth/grant shape matches MySQL's
+  // and the connection is reachable via the same `mysql2` driver.
+  // We use GenericContainer (not @testcontainers/mysql) because that helper
+  // hard-codes mysql-image env names and entrypoint expectations.
+  mariadb = await new GenericContainer("mariadb:10.11")
+    .withEnvironment({
+      MARIADB_ROOT_PASSWORD: "test",
+      MARIADB_USER: "eventferry",
+      MARIADB_PASSWORD: "test",
+      MARIADB_DATABASE: "eventferry",
+    })
+    .withExposedPorts(3306)
+    .withWaitStrategy(
+      Wait.forLogMessage(/ready for connections/, 2),
+    )
+    .withStartupTimeout(180_000)
+    .start();
+
   redpanda = await new RedpandaContainer(
     "redpandadata/redpanda:latest",
   ).start();
@@ -79,12 +104,18 @@ export async function setup(): Promise<void> {
   process.env.MYSQL_USER = "eventferry";
   process.env.MYSQL_PASSWORD = "test";
   process.env.MYSQL_DATABASE = "eventferry";
+  process.env.MARIADB_HOST = mariadb.getHost();
+  process.env.MARIADB_PORT = String(mariadb.getMappedPort(3306));
+  process.env.MARIADB_USER = "eventferry";
+  process.env.MARIADB_PASSWORD = "test";
+  process.env.MARIADB_DATABASE = "eventferry";
   process.env.KAFKA_BROKERS = redpanda.getBootstrapServers();
   process.env.SCHEMA_REGISTRY_URL = redpanda.getSchemaRegistryAddress();
 }
 
 export async function teardown(): Promise<void> {
   await redpanda?.stop();
+  await mariadb?.stop();
   await mysql?.stop();
   await pg?.stop();
 }

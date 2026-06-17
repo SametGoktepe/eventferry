@@ -1,12 +1,19 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Pool } from "mysql2/promise";
 import { MysqlStore, createMigrationSql } from "@eventferry/mysql";
-import { newMysqlPool, uniqueName } from "./helpers.js";
+import { newMysqlPool, newMariadbPool, uniqueName } from "./helpers.js";
 
-describe("MysqlStore against real MySQL 8", () => {
+// Run the same MysqlStore contract on both engines. Same code, two
+// backends — proves the strict head-of-aggregate / SKIP LOCKED path
+// works identically on MariaDB 10.6+ (where SKIP LOCKED first landed)
+// as it does on MySQL 8.0.1+. Bug-hunt extras live on MySQL only.
+describe.each([
+  { engine: "MySQL 8", makePool: newMysqlPool },
+  { engine: "MariaDB 10.11", makePool: newMariadbPool },
+])("MysqlStore against real $engine", ({ makePool }) => {
   let pool: Pool;
   beforeAll(() => {
-    pool = newMysqlPool();
+    pool = makePool();
   });
   afterAll(async () => {
     await pool.end();

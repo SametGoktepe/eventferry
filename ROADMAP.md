@@ -196,8 +196,8 @@ with a clean answer for all three pillars.
 - [x] `claimBatch` via `SELECT ... FOR UPDATE SKIP LOCKED` (MySQL **8.0.1+**, MariaDB **10.6+**)
 - [x] Polling-only by default (MySQL has no `LISTEN/NOTIFY`)
 - [x] Binlog (row-based) streaming relay — `MysqlBinlogRelay` via `@vlasky/zongji`
-- [ ] Documented fallback for older engines: atomic status-flip with `UPDATE ... ORDER BY id LIMIT n` + claim token
-- [ ] Passes the shared conformance kit on MySQL 8 **and** MariaDB (integration suite)
+- [x] Documented fallback for older engines: `UPDATE ... ORDER BY id LIMIT n` + claim-token pattern with a one-time `claim_token` column. Covered in the package README's "Running on an older engine" section with the full claim path + caveats (throughput vs engine-floor trade-off).
+- [x] Passes the shared conformance kit on MySQL 8 **and** MariaDB 10.11 — integration suite parametrizes the `mysql-store` tests with `describe.each` against both engines. Caught a real MariaDB JSON-as-LONGTEXT driver-parity bug during the rollout (`row.ts` now defensively parses string payloads).
 
 ### SQL Server — `@eventferry/mssql`
 - [ ] `claimBatch` via `UPDATE TOP (n) ... WITH (READPAST, UPDLOCK, ROWLOCK) ... OUTPUT inserted.*` (atomic claim-and-read)

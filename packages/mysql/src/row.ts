@@ -23,6 +23,14 @@ export interface OutboxRow {
  * Map a raw DB row to the broker-agnostic core record. `id` is stringified
  * because mysql2 may return BIGINT either as a JS number, string, or bigint
  * depending on driver options — the core contract is `string`.
+ *
+ * `payload` / `headers` are JSON columns, but driver behavior splits:
+ *   - MySQL 8 has a native JSON type, and the `mysql2` driver auto-parses
+ *     it to a JS object / array on read.
+ *   - MariaDB exposes JSON as a `LONGTEXT` alias with a CHECK constraint —
+ *     no native type → the driver returns the raw string.
+ * To stay engine-agnostic we re-parse strings here; objects pass through
+ * untouched. Belt and suspenders.
  */
 export function rowToRecord(row: OutboxRow): OutboxRecord {
   const status: OutboxStatus = OUTBOX_STATUS_FROM_CODE[row.status] ?? "pending";
@@ -33,8 +41,8 @@ export function rowToRecord(row: OutboxRow): OutboxRecord {
     aggregateType: row.aggregate_type,
     aggregateId: row.aggregate_id,
     key: row.key,
-    payload: row.payload,
-    headers: row.headers ?? {},
+    payload: parseJsonField<unknown>(row.payload),
+    headers: parseJsonField<Record<string, string> | null>(row.headers) ?? {},
     traceId: row.trace_id,
     status,
     attempts: row.attempts,
@@ -42,4 +50,16 @@ export function rowToRecord(row: OutboxRow): OutboxRecord {
     createdAt: row.created_at,
     processedAt: row.processed_at,
   };
+}
+
+/**
+ * Defensive JSON parser for fields the driver may or may not have parsed
+ * (MySQL 8 yes, MariaDB no). Strings get JSON.parse'd; everything else
+ * passes through. Throws if the string is malformed — a malformed JSON
+ * payload in the outbox would be a write-side bug, surface it loudly.
+ */
+function parseJsonField<T>(value: unknown): T {
+  if (value === null || value === undefined) return value as T;
+  if (typeof value === "string") return JSON.parse(value) as T;
+  return value as T;
 }
