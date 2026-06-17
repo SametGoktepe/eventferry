@@ -32,6 +32,37 @@ Topics without a configured schema use the subject's latest registered schema
 (default subject: `${topic}-value`). On the consumer, decode with the same client:
 `await registry.decode(message.value)`.
 
+## Authentication
+
+The serializer accepts the two HTTP auth shapes Confluent Schema Registry installations use:
+
+```ts
+// HTTP Basic — Confluent Cloud + most commercial registries.
+new SchemaRegistrySerializer({
+  host,
+  auth: { type: "basic", username: "<api-key>", password: "<api-secret>" },
+});
+
+// Bearer token — OIDC, custom SR proxies, etc.
+new SchemaRegistrySerializer({
+  host,
+  auth: { type: "bearer", token: "eyJhbGc..." },
+});
+
+// Rotating bearer token (refresh per request — cache inside your provider).
+new SchemaRegistrySerializer({
+  host,
+  auth: {
+    type: "bearer",
+    token: async () => await getCachedAccessToken(),
+  },
+});
+```
+
+Bearer tokens are injected via a small middleware on the underlying client — the provider is invoked on **every** request, so you control rotation. `auth` is ignored when you pass an already-constructed `registry` client (configure auth there yourself).
+
+For **mTLS** to the registry, supply a custom `https.Agent` on a self-constructed client and pass it via the `registry` option. The serializer does not surface a separate `tls` block — registry TLS is independent of broker TLS and `https.Agent` is the standard Node entry point.
+
 ## Subject naming strategies
 
 Pick one of Confluent's three built-in strategies (default `TopicNameStrategy`):
