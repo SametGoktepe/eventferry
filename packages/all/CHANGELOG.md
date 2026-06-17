@@ -1,5 +1,16 @@
 # @eventferry/all
 
+## 3.2.2
+
+### Patch Changes
+
+- Updated dependencies [cdc20cf]
+  - @eventferry/core@3.3.0
+  - @eventferry/postgres@3.3.0
+  - @eventferry/mysql@3.3.0
+  - @eventferry/kafka@3.3.0
+  - @eventferry/schema-registry@3.2.2
+
 ## 3.2.1
 
 ### Patch Changes
