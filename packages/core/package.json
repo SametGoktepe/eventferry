@@ -1,6 +1,6 @@
 {
   "name": "@eventferry/core",
-  "version": "3.2.0",
+  "version": "3.2.1",
   "description": "DB- and broker-agnostic core for the transactional outbox pattern",
   "type": "module",
   "main": "./dist/index.cjs",
