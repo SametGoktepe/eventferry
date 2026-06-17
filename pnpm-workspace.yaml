@@ -11,8 +11,19 @@ packages:
 #             -2mjp-6q6p-2qxm, -g9mf-h72j-4rw9  (testcontainers chain)
 #   uuid    → GHSA-w5hq-g745-h8pq               (testcontainers/dockerode)
 #   ajv     → GHSA-2g4f-4pwh-qvx6               (@kafkajs/confluent-schema-registry)
-#   js-yaml → GHSA-h67p-54hq-rp68               (@changesets/cli)
 #   esbuild → GHSA-g7r4-m6w7-qqqr               (vite/vitest dep — Windows dev-server only)
+#
+# NOT overridden:
+#   js-yaml (GHSA-h67p-54hq-rp68) — patched only in 4.2.0+, but the
+#     only consumer in our tree is @changesets/cli's transitive
+#     read-yaml-file@1.1.0, which calls the v3-only `yaml.safeLoad`
+#     API removed in v4. Forcing js-yaml@4 broke `changeset publish`
+#     in the release workflow with "Function yaml.safeLoad is removed
+#     in js-yaml 4. Use yaml.load instead". The alert touches a
+#     CI-only dev-time CLI (no production code path), so we dismiss
+#     it instead and wait for read-yaml-file / @manypkg upstreams to
+#     migrate. Re-add this override the moment the upstream chain
+#     stops pinning js-yaml@3.
 #
 # Deprecation overrides (no CVE, just noisy pnpm warnings):
 #   glob    → 10.5.0 deprecated; force ≥11        (archiver/testcontainers chain)
@@ -20,7 +31,6 @@ overrides:
   undici: ">=6.24.0"
   uuid: ">=11.1.1"
   ajv: ">=8.18.0"
-  js-yaml: ">=4.2.0"
   esbuild: ">=0.28.1"
   glob: ">=11.0.0"
 
