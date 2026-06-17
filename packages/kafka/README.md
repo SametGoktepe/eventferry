@@ -175,6 +175,81 @@ new KafkaPublisher({
 - `"legacy"` — pre-v2 hashing. Use when migrating an existing topic to keep hash continuity.
 - `"default"` — kafkajs's current default. May change in future major versions.
 
+## Observability
+
+### Hooks
+
+Wire lifecycle hooks into your metrics / logging stack without subclassing or wrapping the publisher:
+
+```ts
+new KafkaPublisher({
+  brokers,
+  hooks: {
+    onConnect:     ()       => readinessProbe.up(),
+    onDisconnect:  ()       => readinessProbe.down(),
+    onPublish:    (r, msg)  => metrics.publishCounter.inc({ ok: String(r.ok) }),
+    onError:      (e, msg)  => sentry.captureException(e, { msg }),
+    onTransactionAbort: (e) => metrics.txAborts.inc(),
+  },
+});
+```
+
+Hooks are **safe by construction**: a throwing hook never breaks publishing; the publisher swallows the error and logs it via the configured `logger`.
+
+### OpenTelemetry tracing
+
+The publisher wraps each `publish()` in a span that follows the current stable [OpenTelemetry messaging semantic conventions](https://github.com/open-telemetry/semantic-conventions/blob/main/docs/messaging/kafka.md). No dependency on `@opentelemetry/api` — wire your tracer through a thin adapter:
+
+```ts
+import { trace, SpanKind, SpanStatusCode } from "@opentelemetry/api";
+import type { KafkaTracer, SpanLike } from "@eventferry/kafka";
+
+const otel = trace.getTracer("@eventferry/kafka");
+
+const tracer: KafkaTracer = {
+  startPublishSpan(name, attributes) {
+    const span = otel.startSpan(name, { kind: SpanKind.PRODUCER, attributes });
+    return {
+      setAttribute: (k, v) => span.setAttribute(k, v),
+      setAttributes: (a) => span.setAttributes(a),
+      setStatus: (s) =>
+        span.setStatus({
+          code: s.code === "ok" ? SpanStatusCode.OK : SpanStatusCode.ERROR,
+          message: s.message,
+        }),
+      recordException: (e) => span.recordException(e),
+      end: () => span.end(),
+    } satisfies SpanLike;
+  },
+};
+
+new KafkaPublisher({ brokers, tracer });
+```
+
+Per the spec, eventferry emits **one span per `publish()` call**, named `"{topic} publish"`, with attributes:
+
+| Attribute | Always | Notes |
+|---|:--:|---|
+| `messaging.system` | ✅ | `"kafka"` |
+| `messaging.operation.type` | ✅ | `"publish"` |
+| `messaging.destination.name` | ✅ | First topic in the batch |
+| `messaging.batch.message_count` | ✅ | Including single-message batches |
+
+The user-supplied tracer SHOULD set `SpanKind.PRODUCER` on the span; the adapter above does this explicitly.
+
+### Logger
+
+Pass a `Logger` (the same interface used by `@eventferry/core`) to route the publisher's own diagnostics — driver warnings, hook failures — through your logging stack:
+
+```ts
+new KafkaPublisher({
+  brokers,
+  logger: pinoLoggerAdapter, // anything implementing { debug, info, warn, error }
+});
+```
+
+When omitted, the publisher is silent and the driver falls back to `console.warn` for its diagnostics (preserves prior behavior).
+
 📖 **Full documentation:** [github.com/SametGoktepe/eventferry](https://github.com/SametGoktepe/eventferry#readme)
 
 ## License

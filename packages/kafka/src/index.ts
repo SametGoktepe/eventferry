@@ -4,4 +4,6 @@ export * from "./kafkajs-classifier.js";
 export * from "./confluent-driver.js";
 export * from "./confluent-classifier.js";
 export * from "./confluent-config.js";
+export * from "./hooks.js";
+export * from "./tracing.js";
 export * from "./publisher.js";
