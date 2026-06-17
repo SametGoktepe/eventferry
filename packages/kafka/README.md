@@ -67,6 +67,40 @@ new KafkaPublisher({
 > non-negotiable. For dev clusters with self-signed certs, pass the cluster
 > CA via `ca` so verification succeeds.
 
+### Dev cluster with a self-signed cert
+
+The right pattern is to pin **your** CA. Verification still happens — just against your CA instead of the system trust store.
+
+```ts
+new KafkaPublisher({
+  brokers: ["dev-broker.internal:9093"],
+  ssl: {
+    ca: readFileSync("/path/to/dev-cluster-ca.pem"),
+    // Cluster reachable via DNS that doesn't match the cert SAN?
+    // Pin the SNI host the cert was issued for:
+    servername: "kafka.dev.internal",
+  },
+});
+```
+
+**Never** add `rejectUnauthorized: false` (TS would reject it anyway — it's not in the type). That disables verification entirely and opens every connection to a man-in-the-middle.
+
+### IP-literal brokers (cert hostname mismatch)
+
+When the broker address is an IP and the cert was issued for a hostname, set `servername`:
+
+```ts
+new KafkaPublisher({
+  brokers: ["10.0.5.12:9093"],          // IP literal
+  ssl: {
+    ca: readFileSync("/etc/ssl/kafka-ca.pem"),
+    servername: "broker.example.com",   // hostname the cert was issued for
+  },
+});
+```
+
+`servername` is honored by the **kafkajs** driver (Node `tls.connect` reads `servername` directly). It's a **documented no-op on the confluent driver** — librdkafka v1.x's kafkaJS-compat layer doesn't expose an SNI override, and SNI is derived from the broker address. Use the kafkajs driver when you need the SNI lever.
+
 ### SASL — username + password (PLAIN / SCRAM)
 
 ```ts

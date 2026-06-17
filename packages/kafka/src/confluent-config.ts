@@ -103,9 +103,12 @@ export function buildConfluentClientConfig(
     if (tls.passphrase !== undefined) {
       librdkafka["ssl.key.password"] = tls.passphrase;
     }
-    // servername (SNI) — librdkafka derives SNI from `ssl.endpoint.identification.algorithm`;
-    // explicit SNI override is not documented in the v1.x kafkaJS-compat surface, so we
-    // honor it as a no-op for now and document the limitation in the gap analysis.
+    // servername (SNI) — librdkafka v1.x does not expose an explicit SNI
+    // override at the kafkaJS-compat layer (SNI is derived from the broker
+    // address). Honored as a documented no-op here; the option is
+    // meaningful on the kafkajs driver and a multi-driver setup shouldn't
+    // bear extra warning noise because one of the two ignores it. The
+    // TlsConfig JSDoc + README call out the driver-parity gap.
   } else if (opts.ssl === true) {
     // Simple TLS — kafkajs-compat boolean is sufficient.
     kafkaJS["ssl"] = true;

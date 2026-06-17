@@ -40,7 +40,20 @@ export interface KafkaDriver {
  * TLS using the driver's default trust store).
  *
  * `rejectUnauthorized` is intentionally NOT a knob here — TLS verification is
- * non-negotiable. Dev clusters with self-signed certs pass their CA via `ca`.
+ * non-negotiable. Dev clusters with self-signed certs MUST pass their CA via
+ * `ca` (validation still happens, against your CA instead of the system
+ * trust store). If the broker is addressed by an IP literal or a hostname
+ * that doesn't match the cert SAN, set `servername` to the hostname the
+ * cert was issued for so SNI + verification align.
+ *
+ * **Driver parity:**
+ * - `ca`, `cert`, `key`, `passphrase` work on both kafkajs and confluent.
+ * - `servername` is honored by **kafkajs** (Node `tls.connect` reads
+ *   `servername` directly). On the **confluent** driver it's a documented
+ *   no-op — librdkafka derives SNI from the broker address and v1.x's
+ *   kafkaJS-compat layer does not surface an override. Use the kafkajs
+ *   driver for clusters where you need the SNI lever, or wait for
+ *   librdkafka to expose it.
  */
 export interface TlsConfig {
   /** PEM-encoded CA bundle. Buffers and strings both accepted. */
@@ -51,7 +64,13 @@ export interface TlsConfig {
   key?: string | Buffer;
   /** Passphrase for an encrypted private key. */
   passphrase?: string;
-  /** SNI host. Useful when broker address doesn't match the cert SAN. */
+  /**
+   * SNI host. Set this when the broker address (e.g. an IP literal or an
+   * internal DNS name) does NOT match the certificate's Subject
+   * Alternative Names. Honored on the kafkajs driver; no-op on the
+   * confluent driver (librdkafka does not expose an SNI override at
+   * v1.x).
+   */
   servername?: string;
 }
 
