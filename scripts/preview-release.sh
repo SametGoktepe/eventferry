@@ -100,8 +100,11 @@ echo
 
 if (( warned == 1 )); then
   echo "⚠  At least one package took a major bump."
-  echo "   If your changesets only requested 'minor' / 'patch', this is the"
-  echo "   known fixed-group + workspace-deps inflation. See RELEASING.md."
+  echo
+  echo "   With the current independent-versioning config a major bump should"
+  echo "   only happen when a changeset's frontmatter explicitly requests"
+  echo "   'major'. If none of your changesets did, the config may have"
+  echo "   regressed — see RELEASING.md > 'Why preview-release.sh is still here'."
 fi
 
 echo "✓ Preview complete. Temp dir cleaned up."

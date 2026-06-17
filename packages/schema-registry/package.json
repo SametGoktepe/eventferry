@@ -49,8 +49,10 @@
   "engines": {
     "node": ">=18"
   },
+  "dependencies": {
+    "@eventferry/core": "workspace:*"
+  },
   "peerDependencies": {
-    "@eventferry/core": "workspace:*",
     "@kafkajs/confluent-schema-registry": "^3.0.0"
   },
   "peerDependenciesMeta": {

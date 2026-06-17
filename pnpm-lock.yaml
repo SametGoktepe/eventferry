@@ -126,10 +126,10 @@ importers:
       '@confluentinc/kafka-javascript':
         specifier: ^1.0.0
         version: 1.9.1
-    devDependencies:
       '@eventferry/core':
         specifier: workspace:*
         version: link:../core
+    devDependencies:
       kafkajs:
         specifier: ^2.2.4
         version: 2.2.4
@@ -145,13 +145,13 @@ importers:
 
   packages/mysql:
     dependencies:
+      '@eventferry/core':
+        specifier: workspace:*
+        version: link:../core
       '@vlasky/zongji':
         specifier: ^0.6.0
         version: 0.6.1(@types/node@22.19.21)
     devDependencies:
-      '@eventferry/core':
-        specifier: workspace:*
-        version: link:../core
       mysql2:
         specifier: ^3.11.5
         version: 3.22.5(@types/node@22.19.21)
@@ -166,10 +166,11 @@ importers:
         version: 2.1.9(@types/node@22.19.21)
 
   packages/postgres:
-    devDependencies:
+    dependencies:
       '@eventferry/core':
         specifier: workspace:*
         version: link:../core
+    devDependencies:
       '@types/pg':
         specifier: ^8.11.10
         version: 8.20.0
@@ -190,10 +191,11 @@ importers:
         version: 2.1.9(@types/node@22.19.21)
 
   packages/schema-registry:
-    devDependencies:
+    dependencies:
       '@eventferry/core':
         specifier: workspace:*
         version: link:../core
+    devDependencies:
       '@kafkajs/confluent-schema-registry':
         specifier: ^3.0.0
         version: 3.9.0

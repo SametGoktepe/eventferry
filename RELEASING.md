@@ -1,185 +1,153 @@
 # Releasing `eventferry`
 
-This document is the workflow we follow before every release. It exists
-because changesets/cli@2.31 + this repo's fixed-group + workspace-deps
-layout can inflate a "minor" changeset into a major version bump
-without warning. Run the preview, accept or correct the result, then
-let the GitHub Actions release flow do the rest.
+eventferry uses [changesets](https://github.com/changesets/changesets)
+with **independent versioning**: each `@eventferry/*` package moves at
+its own semver tempo, and the meta-package `@eventferry/all` automatically
+follows whichever of its siblings change in a given release.
 
-## TL;DR
+This document captures the workflow and explains the historical reason we
+keep the `scripts/preview-release.sh` belt-and-suspenders check.
+
+## TL;DR — happy path
 
 ```bash
-# On the PR branch (or right after merge), before triggering the release:
+# Add a changeset when you make a user-facing change.
+# It records which packages to bump and at what level.
+pnpm changeset
+
+# Before merging your feature PR, preview what `release.yml` will compute:
 ./scripts/preview-release.sh
 
-# Inspect the output. If the bumps match what you expected, you're done —
-# merge the "Version Packages" PR when it appears.
-# If a package took an unexpected major bump, see "Correcting an
-# unexpected bump" below.
+# Inspect the output — each package gets exactly the bump its changeset
+# requested. Sibling packages that consume a bumped package via workspace:*
+# get a `patch` bump (via `updateInternalDependencies: "patch"`).
+#
+# Open the PR; once it merges, release.yml opens a "Version Packages" PR.
+# Merge that PR; release.yml publishes via npm OIDC trusted publishing.
 ```
 
-## Background — why this exists
+That's it. No manual corrections. The "Path B" force-push procedure that
+used to live here is no longer needed.
 
-eventferry publishes six `@eventferry/*` packages in lockstep. The
-`.changeset/config.json` declares `fixed: [["@eventferry/*"]]`, which
-means **every package must release at the same version on every release**.
-The packages also reference each other via `workspace:*`, so any change
-to one triggers an `Updated dependencies` patch bump in the others.
+## How the config works
 
-The combination — fixed group + workspace-deps update chain + multiple
-packages listed in a single changeset — has produced unexpected major
-bumps **twice** in our history:
+`.changeset/config.json`:
 
-| From → To | Pending changesets | What we expected | What changesets produced |
+```json
+{
+  "fixed": [],
+  "linked": [],
+  "updateInternalDependencies": "patch",
+  "___experimentalUnsafeOptions_WILL_CHANGE_IN_PATCH": {
+    "onlyUpdatePeerDependentsWhenOutOfRange": true
+  }
+}
+```
+
+- `fixed: []` — packages are NOT locked to a single version. Each one
+  evolves independently.
+- `linked: []` — no soft-linking either. Full independence.
+- `updateInternalDependencies: "patch"` — when package A's version bumps,
+  any sibling B that depends on A via `workspace:*` gets a **patch** bump
+  reflecting the new dependency, never a major.
+- `onlyUpdatePeerDependentsWhenOutOfRange: true` — peer dependents are
+  only bumped when the peer would otherwise fall out of the declared
+  range. Without this flag, **every** internal version bump cascades a
+  major to peer-dependents, which is the bug that produced our
+  `1.0.4 → 2.0.0`, `2.0.0 → 3.0.0`, `3.0.0 → 3.1.0 (after manual fix)`
+  history.
+
+## How `@eventferry/*` packages reference each other
+
+`@eventferry/core` is a regular **dependency** (NOT a peerDependency) of
+the adapters that need it (`postgres`, `mysql`, `kafka`,
+`schema-registry`). This was the structural fix for the
+[peer-dependency major-bump cascade](https://github.com/changesets/changesets/issues/1759).
+
+External peer deps (`pg`, `mysql2`, `kafkajs`, `@confluentinc/kafka-javascript`,
+`@kafkajs/confluent-schema-registry`, etc.) stay as `peerDependencies` —
+those are user choices about which driver to install.
+
+`@eventferry/all` lists every sibling under `dependencies` via
+`workspace:*`. pnpm rewrites `workspace:*` to the exact published version
+at `npm publish` time, so `@eventferry/all@x.y.z` always pins coherent
+sibling versions.
+
+## Why `preview-release.sh` is still here
+
+The script is now a **safety net**, not a workflow gate. It catches:
+
+- A future changesets bug that re-introduces unwanted version inflation.
+- A new package added to the repo without the right
+  `dependencies` / `peerDependencies` shape.
+- An accidentally-committed test changeset.
+
+If you ever see `⚠ MAJOR` flagged in the preview output without an
+explicit `major` request in your changeset frontmatter, **stop and
+investigate** — something has regressed the config.
+
+## Adding a new `@eventferry/<name>` package
+
+When introducing a brand-new adapter:
+
+1. Use `pnpm create` or copy an existing adapter as a template.
+2. **List `@eventferry/core` (and any other internal package you need) under
+   `dependencies`, never `peerDependencies`.** External user-facing
+   peers (drivers, clients) go under `peerDependencies` as usual.
+3. Add the package to `@eventferry/all`'s `dependencies` (via `workspace:*`).
+4. Write a changeset noting the new package — `minor` is the right bump
+   level for "adds new package X".
+5. Run `./scripts/preview-release.sh`. The new package should appear in
+   the bump table; sibling packages should NOT take a major bump.
+
+## Trade-offs we accept with independent versioning
+
+- **Sibling drift is normal.** `@eventferry/core@3.5.0` alongside
+  `@eventferry/postgres@3.2.1` and `@eventferry/kafka@3.4.0` is OK —
+  it reflects which packages actually changed.
+- **CHANGELOG.md per package is the source of truth.** There is no
+  "platform v3.5 changelog" — each package's CHANGELOG tells its own
+  story. Look at `@eventferry/all`'s CHANGELOG to see which siblings
+  shifted on a given release.
+- **`@eventferry/all` gets a patch bump on almost every release.** That
+  is correct: any time one of its deps moves, the meta-package's deps
+  block also moves and needs a release. The patches reflect "I now pin
+  newer versions of my constituents."
+
+## Out of scope
+
+- Single-line "platform version" marketing. (We use per-package
+  versions; `@eventferry/all` is the closest analogue.)
+- Synchronized CHANGELOG histories. (Each package documents only its
+  own changes.)
+- Lockstep major bumps across the whole repo. (A real breaking change
+  to `core` only marks core as major; adapters keep their own version
+  unless they themselves break.)
+
+## Historical context (kept for the record)
+
+Before this migration, the repo used `fixed: [["@eventferry/*"]]` to
+keep all packages on the same version, and `@eventferry/core` was a
+`peerDependency` of the adapters. Every multi-package changeset produced
+an unexpected major bump:
+
+| From → To | Pending changesets | Expected | Actual |
 |---|---|:--:|:--:|
-| `1.0.4 → 2.0.0` | `@eventferry/mysql: minor` (new package) | `1.1.0` | `2.0.0` |
-| `2.0.0 → 3.0.0` | `@eventferry/core: minor` + `@eventferry/kafka: minor` | `2.1.0` | `3.0.0` |
+| `1.0.4 → 2.0.0` | `mysql: minor` (new package) | `1.1.0` | `2.0.0` ❌ |
+| `2.0.0 → 3.0.0` | `core: minor` + `kafka: minor` | `2.1.0` | `3.0.0` ❌ |
+| `3.0.0 → 4.0.0` (corrected to `3.1.0`) | `core: minor` + `kafka: minor` | `3.1.0` | `4.0.0` ❌ |
+| `3.1.0 → 4.0.0` (corrected to `3.2.0`) | `kafka: minor` ×2 | `3.2.0` | `4.0.0` ❌ |
 
-The CHANGELOGs show each affected package was marked "Minor Changes" or
-"Patch Changes" — never "Major Changes". The major version increment
-came out of the version-computation pass, not from any human-authored
-intent. The behavior is reproducible on the exact repo state (we have
-a self-contained repro in `scripts/preview-release.sh`).
+Root cause: changesets'
+[`docs/decisions.md`](https://github.com/changesets/changesets/blob/main/docs/decisions.md)
+states that when one package lists another as a `peerDependency`, an
+internal version bump of the depended-upon package forces a major on
+the dependent. Combined with `fixed:` reconciliation, every minor
+became a major. Documented in
+[changesets issue #1759](https://github.com/changesets/changesets/issues/1759).
 
-We are not the first project to hit this. Rather than fight the tool,
-we've decided to:
-1. **Preview the version** locally before letting release.yml apply it.
-2. **Accept the major bump** when the cost of correcting is higher than
-   the cost of a louder version label.
-3. **Correct the bump** when we genuinely want the version we expected
-   and are willing to do a manual `force-push` to the
-   `changeset-release/main` branch.
-
-## The runbook
-
-### Step 1 — Preview before merging the feature PR
-
-When your feature PR is approved and has a changeset:
-
-```bash
-git checkout main && git pull
-git checkout your-feature-branch
-./scripts/preview-release.sh
-```
-
-The script:
-
-- Archives your current ref into a temp dir (does NOT touch your tree).
-- Lists every pending changeset and its requested bumps.
-- Installs `@changesets/cli` in the temp dir.
-- Runs `changeset version` against the archived state.
-- Prints a `before → after` version table for every workspace package.
-- Flags any **major** jump with a `⚠ MAJOR` marker.
-
-You see exactly what `release.yml` will compute. No surprises.
-
-### Step 2 — Decide
-
-**Bumps look right** → merge the PR. `release.yml` runs, opens the
-"Version Packages" PR with the expected versions, you merge it,
-packages publish.
-
-**A package took an unexpected major bump** → see Step 3.
-
-### Step 3 — Correcting an unexpected bump
-
-Two paths, pick by cost:
-
-#### Path A — accept the major (the easy one)
-
-Honestly, this is what we've done both previous times. Semver-wise
-it's not "wrong" — bumping the major version means "consumers should
-read the changelog before upgrading", which is true of every release
-anyway. The cost is one confused user thread asking "why is `mysql`
-on v3 when there was no v2?"
-
-Action: merge the feature PR. Let `release.yml` produce the major
-version PR. Merge that. Done.
-
-#### Path B — correct the bump (the manual one)
-
-You really want `2.1.0` instead of `3.0.0`. Steps:
-
-1. **Merge the feature PR** into `main`. `release.yml` runs and opens
-   the **"Version Packages"** PR. Do **not** merge it yet.
-
-2. **Pull the auto-generated version branch locally:**
-
-   ```bash
-   git fetch origin changeset-release/main
-   git checkout changeset-release/main
-   ```
-
-3. **Edit every `packages/*/package.json`** to the version you want
-   (e.g. `2.1.0`). For each one, also fix the matching `CHANGELOG.md`:
-   change the `## 3.0.0` heading to `## 2.1.0`.
-
-4. **Fix `workspace:*` references**: since the `CHANGELOG.md` of
-   `@eventferry/all` (and other downstream packages) shows
-   `@eventferry/core@3.0.0` etc. under "Updated dependencies", rewrite
-   those to the corrected version.
-
-5. **Commit and force-push:**
-
-   ```bash
-   git add packages/*/package.json packages/*/CHANGELOG.md
-   git commit -m "chore: correct version bump to 2.1.0"
-   git push --force-with-lease origin changeset-release/main
-   ```
-
-   `force-with-lease` is safer than plain `--force` — it refuses if
-   someone else pushed in the meantime.
-
-6. **Re-verify** the Version Packages PR on GitHub now shows the
-   corrected versions, then merge it. `release.yml` re-runs and
-   publishes those exact versions.
-
-### Step 4 — Verify the publish
-
-After the "Version Packages" PR merges:
-
-```bash
-for p in core postgres kafka schema-registry mysql all; do
-  echo "@eventferry/$p → $(npm view @eventferry/$p version)"
-done
-```
-
-All six should show the same expected version.
-
-## Adding new packages
-
-Adding a brand-new `@eventferry/<name>` package to the workspace
-**triggers the inflation behavior reliably** — the `1.0.4 → 2.0.0`
-jump was caused by adding `@eventferry/mysql`. Plan accordingly:
-
-- Set the new package's initial `version` to **the current
-  fixed-group baseline** (e.g. `2.0.0` if everyone else is at
-  `2.0.0`). This avoids the "starting from `0.x`" mismatch that
-  changesets sometimes interprets as "needs a major to reconcile".
-- Use a `minor` (or `patch`) changeset for the introduction. The
-  changesets CLI may still inflate to major; preview to confirm
-  before merging.
-- If it inflates and you can't accept the major, follow Path B
-  in Step 3.
-
-## When NOT to use this runbook
-
-- For purely-internal changes (docs, CI, scripts under `docs/`,
-  `scripts/`) that don't have a `.changeset/*.md`: nothing to
-  release; merge and move on.
-- For changeset updates only (editing an existing changeset's
-  bump type): the preview still works, just re-run it.
-
-## Future improvements
-
-The right long-term fix is to either:
-
-- Pin `@changesets/cli` to a version that does not exhibit this
-  behavior (if we identify which release broke it).
-- Migrate away from `fixed: [["@eventferry/*"]]` to per-package
-  versioning, accepting that `@eventferry/all` becomes a meta-package
-  whose pinned versions need explicit maintenance.
-
-Neither has obviously-better trade-offs than the current "preview +
-correct on demand" approach. Revisit if the manual corrections start
-costing more time than the preview saves.
+The fix shipped in this repo is exactly the
+[Astro pattern](https://github.com/withastro/astro/blob/main/.changeset/config.json):
+drop `fixed`, set `linked: []`, enable
+`onlyUpdatePeerDependentsWhenOutOfRange`, and move internal `@eventferry/*`
+deps from `peerDependencies` to `dependencies`.

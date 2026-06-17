@@ -58,8 +58,10 @@
   "engines": {
     "node": ">=18"
   },
+  "dependencies": {
+    "@eventferry/core": "workspace:*"
+  },
   "peerDependencies": {
-    "@eventferry/core": "workspace:*",
     "pg": "^8.0.0",
     "pg-logical-replication": "^2.0.0"
   },
