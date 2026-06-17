@@ -1,0 +1,81 @@
+# Dependabot keeps dependencies fresh in this pnpm monorepo + GitHub Actions
+# workflows. Runs weekly so the PR queue stays manageable; group related
+# updates so a Vitest minor doesn't open eight separate PRs.
+#
+# Major bumps are deliberately quieter — they're a deliberate decision (and
+# usually need a changeset), so Dependabot only opens them as standalone PRs
+# we triage manually. Security alerts still come through immediately,
+# unaffected by the grouping/ignore rules below.
+version: 2
+
+updates:
+  # ── Workspace npm dependencies (root + every package via pnpm-lock) ────
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Istanbul"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+    labels:
+      - "dependencies"
+    groups:
+      # Tooling families: bump everything in the family in a single PR so
+      # the lockfile and types stay coherent.
+      vitest:
+        patterns:
+          - "vitest"
+          - "@vitest/*"
+      typescript-tooling:
+        patterns:
+          - "typescript"
+          - "tsup"
+          - "@types/*"
+      changesets:
+        patterns:
+          - "@changesets/*"
+      kafka-clients:
+        patterns:
+          - "kafkajs"
+          - "@confluentinc/kafka-javascript"
+          - "@kafkajs/*"
+      database-clients:
+        patterns:
+          - "pg"
+          - "pg-logical-replication"
+          - "mysql2"
+          - "@vlasky/zongji"
+      testcontainers:
+        patterns:
+          - "testcontainers"
+          - "@testcontainers/*"
+    ignore:
+      # Majors land via a deliberate PR (likely with a changeset). Dependabot
+      # still opens them — but only one at a time, ungrouped — so the diff
+      # gets a real review.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  # ── GitHub Actions used by .github/workflows/*.yml ─────────────────────
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Istanbul"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "github-actions"
+    groups:
+      actions:
+        patterns:
+          - "actions/*"
