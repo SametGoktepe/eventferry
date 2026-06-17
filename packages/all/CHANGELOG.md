@@ -1,5 +1,12 @@
 # @eventferry/all
 
+## 3.2.6
+
+### Patch Changes
+
+- Updated dependencies [51e5359]
+  - @eventferry/mysql@3.3.3
+
 ## 3.2.5
 
 ### Patch Changes
