@@ -1,6 +1,6 @@
 {
   "name": "@eventferry/kafka-iam",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "AWS MSK IAM (SASL/OAUTHBEARER over SigV4) helper for @eventferry/kafka",
   "type": "module",
   "main": "./dist/index.cjs",
