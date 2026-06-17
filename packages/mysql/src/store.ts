@@ -156,6 +156,12 @@ export class MysqlStore implements OutboxStore {
    * A row stuck in `processing` longer than claimTimeoutMs is treated as due
    * again (its owning relay is presumed dead), which keeps a crash between
    * claim and ack from orphaning messages.
+   *
+   * ENGINE FLOOR: requires `SELECT ... FOR UPDATE SKIP LOCKED` —
+   * MySQL 8.0.1+ or MariaDB 10.6+. On older engines, the documented
+   * `UPDATE ... ORDER BY id LIMIT n` + claim-token fallback in the package
+   * README is the supported workaround (one-time `claim_token` column
+   * addition + a custom claim path). Throughput trades for engine support.
    */
   async claimBatch(batchSize: number): Promise<OutboxRecord[]> {
     const conn = await this.pool.getConnection();
