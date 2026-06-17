@@ -275,6 +275,40 @@ export interface ProducerBehaviorConfig {
    * extension point, not a JS callback.
    */
   customPartitioner?: () => (args: unknown) => number;
+  /**
+   * (confluent only) Periodic librdkafka statistics callback. When set,
+   * eventferry wires `stats_cb` on the underlying producer and parses the
+   * JSON payload librdkafka emits every {@link statsIntervalMs} ms.
+   *
+   * The shape is intentionally opaque — librdkafka's stats schema is huge
+   * (txmsgs, rxbytes, queue depth, broker timeouts, per-topic / per-partition
+   * counters…) and evolves across versions. Documented at
+   * https://github.com/confluentinc/librdkafka/blob/master/STATISTICS.md.
+   * Cast to your own narrower type if you're consuming a known subset.
+   *
+   * No-op on the kafkajs driver — kafkajs has no equivalent surface.
+   * Pair with {@link statsIntervalMs} (defaults to 30000 ms when this hook
+   * is set but `rawProducerConfig['statistics.interval.ms']` isn't).
+   */
+  onStats?: (stats: LibrdkafkaStats) => void;
+  /**
+   * (confluent only) Override the polling interval the librdkafka stats
+   * callback fires at. Maps to `statistics.interval.ms`. Defaults to
+   * 30000 ms when {@link onStats} is set; defaults to 0 (disabled)
+   * otherwise — librdkafka spends CPU on this and we don't want to enable
+   * it silently. Set to 0 to suppress emission while keeping the hook
+   * defined (useful for tests).
+   */
+  statsIntervalMs?: number;
 }
+
+/**
+ * Opaque envelope for librdkafka's stats JSON. The schema is
+ * version-specific and large; eventferry surfaces it untyped so you can
+ * cast to whatever subset you care about.
+ *
+ * Reference: https://github.com/confluentinc/librdkafka/blob/master/STATISTICS.md
+ */
+export type LibrdkafkaStats = Record<string, unknown>;
 
 export type DriverKind = "kafkajs" | "confluent";

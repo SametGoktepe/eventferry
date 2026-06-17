@@ -1,5 +1,6 @@
 import type {
   KafkaConnectionConfig,
+  LibrdkafkaStats,
   ProducerBehaviorConfig,
   TlsConfig,
 } from "./driver.js";
@@ -58,6 +59,23 @@ export function buildConfluentClientConfig(
     librdkafka["compression.level"] = opts.compressionLevel;
   }
 
+  // Stats hook: wire `stats_cb` into librdkafka and pick a sensible default
+  // interval. librdkafka stats are CPU-billed (it serializes the stats JSON
+  // each tick) so we don't enable the timer unless the hook is set.
+  if (opts.onStats) {
+    librdkafka["stats_cb"] = wrapStatsCallback(opts.onStats);
+    // Default 30s — long enough to be cheap, short enough to be useful.
+    // Users can override via statsIntervalMs OR rawProducerConfig.
+    librdkafka["statistics.interval.ms"] =
+      opts.statsIntervalMs ?? 30_000;
+  } else if (opts.statsIntervalMs !== undefined) {
+    // statsIntervalMs without onStats is a no-op at the eventferry layer
+    // (librdkafka still emits stats events, just discarded). Honor the
+    // setting in case the user wired their own event listener on the
+    // raw client via rawProducerConfig.
+    librdkafka["statistics.interval.ms"] = opts.statsIntervalMs;
+  }
+
   const tlsRequested = opts.ssl === true || isTlsConfig(opts.ssl);
   const saslRequested = !!opts.sasl;
 
@@ -110,6 +128,34 @@ export function buildConfluentClientConfig(
 
 function isTlsConfig(v: unknown): v is TlsConfig {
   return typeof v === "object" && v !== null;
+}
+
+/**
+ * Wrap the user's onStats callback to:
+ *   1. Parse the JSON string librdkafka emits (it's never an object).
+ *   2. Swallow callback exceptions — a misbehaving observer must never
+ *      take down the producer's event loop.
+ *   3. Swallow JSON parse failures with no further escalation — losing a
+ *      single stats sample is preferable to an unhandled exception in a
+ *      hot-path emitter that fires every {@link ProducerBehaviorConfig.statsIntervalMs}.
+ */
+function wrapStatsCallback(
+  onStats: (stats: LibrdkafkaStats) => void,
+): (raw: string | LibrdkafkaStats) => void {
+  return (raw) => {
+    let parsed: LibrdkafkaStats;
+    try {
+      parsed = typeof raw === "string" ? (JSON.parse(raw) as LibrdkafkaStats) : raw;
+    } catch {
+      return;
+    }
+    try {
+      onStats(parsed);
+    } catch {
+      // user-supplied callback threw; ignore — the producer loop must
+      // continue. Use a logger inside your callback if you want diagnostics.
+    }
+  };
 }
 
 function stringifyPem(input: string | Buffer | Array<string | Buffer>): string {

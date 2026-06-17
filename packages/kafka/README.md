@@ -289,6 +289,28 @@ const tracer: KafkaTracer = {
 
 The publisher clones each outbound message before injecting (the caller's `PublishableMessage` is never mutated, so the relay's retry path stays correct).
 
+## librdkafka stats hook
+
+The confluent driver exposes librdkafka's periodic statistics stream as a typed callback. Useful for piping queue depth, broker latency, broker timeout counts, and per-topic/per-partition counters into your metrics stack.
+
+```ts
+new KafkaPublisher({
+  brokers,
+  driver: "confluent",
+  onStats: (stats) => {
+    // stats is opaque librdkafka JSON. Reach for the fields you care about.
+    promClient.gauge("kafka_msg_cnt").set(stats.msg_cnt as number);
+    promClient.gauge("kafka_txmsgs").set(stats.txmsgs as number);
+  },
+  statsIntervalMs: 30_000, // optional; defaults to 30s when onStats is set
+});
+```
+
+- **`onStats`** receives the librdkafka stats JSON, already parsed to a plain object. The schema is opaque (`Record<string, unknown>`) — librdkafka's stats are huge and evolve across versions. Reference: [librdkafka STATISTICS.md](https://github.com/confluentinc/librdkafka/blob/master/STATISTICS.md).
+- **`statsIntervalMs`** maps to librdkafka's `statistics.interval.ms`. **Defaults to 30000 ms when `onStats` is set; otherwise stays off** (librdkafka CPU-bills the JSON serialization every tick — we don't enable it silently).
+- The wrapper swallows callback exceptions and JSON parse failures — a single dropped sample is preferable to taking down the producer's event loop.
+- **No-op on the kafkajs driver** — kafkajs has no equivalent surface. Logs a one-time warning and ignores both options.
+
 ## Power-user escape hatches
 
 When the high-level options don't reach a knob you need, drop down to the native client config.
