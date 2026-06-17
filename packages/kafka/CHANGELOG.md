@@ -1,5 +1,50 @@
 # @eventferry/kafka
 
+## 3.5.0
+
+### Minor Changes
+
+- fb0549d: Producer-fenced restart. `PRODUCER_FENCED` and `INVALID_PRODUCER_EPOCH` errors now classify as `errorKind: "fenced"` (previously bundled into `"fatal"`). The new kind is documented as **transient by default** — fences also fire on broker restart and network partition recovery, not only on multi-instance collisions.
+
+  New publisher option `autoRecoverFromFence: boolean` (default `false`): when on, a publish batch reporting at least one fenced result triggers exactly one `disconnect → connect → re-send same batch` cycle. Transactional producers re-run `initTransactions` as part of the reconnect. If the second send still reports any fenced record, the publisher gives up — silently retrying again would mask a real misconfiguration. Concurrent fenced publishes share a single in-flight reconnect so the producer is not torn down twice mid-restart.
+
+  New `KafkaPublisherHooks.onProducerFenced(error)` hook fires regardless of the recovery flag — informational signal so dashboards can track fence rates whether or not the publisher attempts recovery.
+
+  `@eventferry/core` minor: `PublishErrorKind` union gains `"fenced"`. The relay treats unknown / `"retriable"` / `"fenced"` identically (retry per backoff, DLQ on `attempts > maxAttempts`) — no relay-level changes required, but the new kind shows up in logs and the `errorKind` field of `PublishResult`.
+
+  Multi-instance EOS guidance: leave `autoRecoverFromFence` OFF and use a callable `transactionalId` that derives a stable, unique id per instance (pod name + replica index). Cross-instance fence is the broker telling the loser instance to stop — recovering silently creates a thrashing leadership flip. The README now spells this out in a `Producer-fenced restart` section.
+
+- 08d3384: `publisher.healthCheck({ timeoutMs })` — cheap reachability probe usable as the body of `/healthz` or `/readyz`. Borrows a fresh admin client, calls `listTopics`, and returns a stable `HealthStatus` shape: `{ ok, latencyMs, timestamp, error? }`. Default timeout 5000 ms (long enough to ride out a single broker leader election, short enough to fail a liveness probe meaningfully); `timeoutMs: 0` disables the timer entirely.
+
+  What it proves: the broker is reachable AND the configured credentials still authenticate. What it does NOT prove: the producer's send path is fully operational — a fenced transactional producer would still answer healthy here. Documented as "broker reachable + auth still good", not "publisher fully operational".
+
+  The borrowed admin is always closed (success, failure, timeout — try/finally). Admin-side close failures are swallowed; health checks aren't the place to crash. Custom drivers without an `admin()` method return `{ ok: false, error: ... }` instead of the throw `publisher.admin()` would surface.
+
+- 90b69c6: librdkafka stats hook on the confluent driver. New `onStats: (stats) => void` callback receives the librdkafka periodic statistics JSON, already parsed to a plain object — pipe queue depth, broker latencies, txmsgs counters, per-topic/per-partition stats into your metrics stack without a second client. The wrapper swallows callback exceptions and JSON parse failures so a misbehaving observer cannot take down the producer's event loop. `statsIntervalMs` controls the polling interval; defaults to 30000 ms when `onStats` is set, stays OFF otherwise (librdkafka CPU-bills the JSON serialization every tick — we don't enable it silently). `rawProducerConfig` still wins on precedence. kafkajs driver warns once and ignores both options — kafkajs has no equivalent surface.
+
+### Patch Changes
+
+- 715523f: Consumer-side documentation. No API change. The root README gains:
+
+  - **`Consuming what eventferry produced`** — canonical loop showing `decode(message)` → `extractTraceContext(headers)` → `defineOutbox(registry).decode(topic, bytes)`. Same registry the producer used, in reverse, returns the typed validated payload.
+  - **`Consuming the DLQ`** — copy-paste handler that routes by `dlq-error-class` (cleaner than parsing `dlq-reason`), pulls `dlq-attempts` for retry-queue accounting, and shows the alert-vs-retry split.
+
+  The `@eventferry/kafka` README adds matching subsections under the existing `Consumer helpers` block: **`Typed payload via the producer-side registry`** and **`DLQ recipe`**.
+
+  `defineOutbox(registry).decode()` was already shipped — the round just makes the symmetric "same registry, both sides" pattern discoverable.
+
+- ba81a78: Hardened TLS configuration documentation. No API change — `ssl.ca`, `ssl.servername`, and the rest of `TlsConfig` were already on the surface. This round:
+
+  - Expanded the `TlsConfig` JSDoc with the driver-parity gap: `servername` is honored by the **kafkajs** driver (Node `tls.connect` reads it directly) but is a documented **no-op on the confluent driver** — librdkafka v1.x's kafkaJS-compat layer doesn't expose an SNI override.
+  - README gained explicit "Dev cluster with a self-signed cert" and "IP-literal brokers (cert hostname mismatch)" sections with copy-paste examples covering CA pinning + `servername` for SNI/SAN alignment.
+  - Reaffirmed that `rejectUnauthorized: false` is **never** going to ship on this surface. TLS verification is non-negotiable. For dev clusters with self-signed certs, the supported pattern is to pass the cluster CA via `ssl.ca` so verification still happens — just against your CA instead of the system trust store.
+
+  Companion library updates (changesets, dependabot) on the way; this patch only touches comments + README, so the change is safe to consume immediately.
+
+- Updated dependencies [715523f]
+- Updated dependencies [fb0549d]
+  - @eventferry/core@3.4.0
+
 ## 3.4.0
 
 ### Minor Changes
