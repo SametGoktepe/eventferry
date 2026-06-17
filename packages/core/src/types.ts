@@ -84,6 +84,20 @@ export interface PublishableMessage {
   /** Original record id, for correlation in publish results. */
   recordId: string;
   messageId: string;
+  /**
+   * Explicit partition override. When set, the publisher MUST route the
+   * record to this exact partition, bypassing the configured partitioner.
+   *
+   * Use cases:
+   *   - Compacted topics with application-managed sharding.
+   *   - Tenant-affinity routing where you compute the partition yourself.
+   *   - Geo-pinning records to a specific broker.
+   *
+   * When omitted (the default), the underlying client's partitioner
+   * decides — usually a hash of `key`, falling back to sticky round-robin
+   * when `key` is null.
+   */
+  partition?: number;
 }
 
 /**

@@ -135,7 +135,14 @@ function groupByTopic(messages: PublishableMessage[]) {
   const byTopic = new Map<string, unknown[]>();
   for (const m of messages) {
     const arr = byTopic.get(m.topic) ?? [];
-    arr.push({ key: m.key, value: m.value, headers: m.headers });
+    arr.push({
+      key: m.key,
+      value: m.value,
+      headers: m.headers,
+      // Per-message partition override. librdkafka honors an explicit
+      // partition value; undefined leaves the default partitioner in charge.
+      ...(m.partition !== undefined ? { partition: m.partition } : {}),
+    });
     byTopic.set(m.topic, arr);
   }
   return [...byTopic.entries()].map(([topic, msgs]) => ({

@@ -142,3 +142,43 @@ describe("buildConfluentClientConfig — SASL", () => {
     expect(librdkafka["ssl.key.pem"]).toBe("KEY");
   });
 });
+
+describe("buildConfluentClientConfig — producer tuning passthrough", () => {
+  it("maps each tuning knob to its librdkafka config key", () => {
+    const { librdkafka } = buildConfluentClientConfig({
+      brokers: ["b:9092"],
+      lingerMs: 25,
+      batchSize: 131_072,
+      maxInFlightRequests: 5,
+      requestTimeoutMs: 30_000,
+      deliveryTimeoutMs: 120_000,
+      maxRequestSize: 2_000_000,
+      transactionTimeoutMs: 90_000,
+    });
+    expect(librdkafka["linger.ms"]).toBe(25);
+    expect(librdkafka["batch.size"]).toBe(131_072);
+    expect(librdkafka["max.in.flight.requests.per.connection"]).toBe(5);
+    expect(librdkafka["request.timeout.ms"]).toBe(30_000);
+    expect(librdkafka["delivery.timeout.ms"]).toBe(120_000);
+    expect(librdkafka["message.max.bytes"]).toBe(2_000_000);
+    expect(librdkafka["transaction.timeout.ms"]).toBe(90_000);
+  });
+
+  it("omits tuning keys when the user doesn't set them", () => {
+    const { librdkafka } = buildConfluentClientConfig({ brokers: ["b:9092"] });
+    expect(librdkafka["linger.ms"]).toBeUndefined();
+    expect(librdkafka["batch.size"]).toBeUndefined();
+    expect(librdkafka["request.timeout.ms"]).toBeUndefined();
+    expect(librdkafka["delivery.timeout.ms"]).toBeUndefined();
+    expect(librdkafka["message.max.bytes"]).toBeUndefined();
+    expect(librdkafka["transaction.timeout.ms"]).toBeUndefined();
+  });
+
+  it("honors a zero value (0 is a valid lingerMs setting)", () => {
+    const { librdkafka } = buildConfluentClientConfig({
+      brokers: ["b:9092"],
+      lingerMs: 0,
+    });
+    expect(librdkafka["linger.ms"]).toBe(0);
+  });
+});

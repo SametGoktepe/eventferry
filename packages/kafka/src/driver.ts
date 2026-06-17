@@ -113,6 +113,25 @@ export interface KafkaConnectionConfig {
   sasl?: SaslConfig;
 }
 
+/**
+ * Choice of partitioner. Only honored by the kafkajs driver — the confluent
+ * driver uses librdkafka's `consistent_random` (key-aware sticky) and
+ * partitioner override is out of scope for this release.
+ *
+ * - `"java-compatible"` (recommended for greenfield): kafkajs's
+ *   `Partitioners.JavaCompatiblePartitioner`. Matches the Java client's
+ *   murmur2-based hash so producers across language boundaries land on the
+ *   same partition for the same key.
+ * - `"legacy"`: kafkajs's pre-v2 partitioner. Use when migrating an existing
+ *   topic where hash continuity matters.
+ * - `"default"`: kafkajs's current default. Equivalent to legacy in v2 but
+ *   may change with major kafkajs releases.
+ *
+ * Setting this also silences the noisy `KafkaJSPartitionerNotSpecified`
+ * warning kafkajs emits when no partitioner choice is made explicitly.
+ */
+export type KafkaJsPartitionerChoice = "default" | "legacy" | "java-compatible";
+
 export interface ProducerBehaviorConfig {
   /** Enable idempotent producer (dedup + ordering). Default true. */
   idempotent?: boolean;
@@ -127,6 +146,56 @@ export interface ProducerBehaviorConfig {
   acks?: number;
   /** Compression codec. Driver maps to its native enum. */
   compression?: "none" | "gzip" | "snappy" | "lz4" | "zstd";
+
+  // ── Tuning knobs ────────────────────────────────────────────────────────
+  //
+  // Driver asymmetry: `kafkajs` does NOT expose `lingerMs`, `batchSize`,
+  // `deliveryTimeoutMs`, or `maxRequestSize` as producer config — its
+  // batching is sticky-partitioner + hardcoded internals. The publicly
+  // typed API stays uniform; on the kafkajs driver, the four
+  // librdkafka-only knobs log a one-time warning and are otherwise
+  // ignored. Use the confluent driver for fine-grained tuning.
+
+  /**
+   * (confluent only) How long the producer waits to accumulate records before
+   * flushing a partition batch. Default 0 (ship-immediately). Increase to
+   * 10–50ms for higher throughput at the cost of latency.
+   */
+  lingerMs?: number;
+  /** (confluent only) Maximum bytes per partition batch before forced flush. */
+  batchSize?: number;
+  /**
+   * Max concurrent unacknowledged producer requests. MUST be ≤5 when
+   * `idempotent: true`. Higher = throughput; lower = stricter ordering on
+   * non-idempotent producers (no other path preserves order on retry).
+   */
+  maxInFlightRequests?: number;
+  /** Per-request broker-ack timeout. Default 30 s. */
+  requestTimeoutMs?: number;
+  /**
+   * (confluent only) End-to-end timeout for a record from produce() call to
+   * terminal success / failure (includes retries). Defaults to 120 s.
+   * If this exceeds the relay's `claimTimeoutMs`, the reaper may double-
+   * publish a slow record — set both coherently.
+   */
+  deliveryTimeoutMs?: number;
+  /**
+   * (confluent only) Max bytes of a single record (after compression).
+   * MUST be ≤ broker's `message.max.bytes`. Defaults to 1 MB.
+   */
+  maxRequestSize?: number;
+  /**
+   * Broker-side ceiling on how long a transaction can stay open before
+   * auto-abort. Maps to `transaction.timeout.ms`. Default 60 s; capped by
+   * the broker's `transaction.max.timeout.ms`.
+   */
+  transactionTimeoutMs?: number;
+  /**
+   * (kafkajs only) Choice of partitioner. See
+   * {@link KafkaJsPartitionerChoice} for the options. Setting any value
+   * silences kafkajs's `KafkaJSPartitionerNotSpecified` warning.
+   */
+  partitioner?: KafkaJsPartitionerChoice;
 }
 
 export type DriverKind = "kafkajs" | "confluent";
