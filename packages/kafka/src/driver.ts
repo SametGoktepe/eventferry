@@ -140,8 +140,21 @@ export interface ProducerBehaviorConfig {
    * Requires a stable transactionalId. Default false.
    */
   transactional?: boolean;
-  /** Required when transactional=true. Must be stable per producer instance. */
-  transactionalId?: string;
+  /**
+   * Required when `transactional=true`. Must be stable per producer instance
+   * — two producers sharing the same id race for the broker-side epoch and
+   * fence each other.
+   *
+   * Accepts a string OR a thunk that resolves the id at connect time. The
+   * callable form lets you derive the id from runtime context that's not
+   * known at construction (pod name, AZ + replica index, k8s ordinal):
+   *
+   *     transactionalId: () => `${process.env.POD_NAME}-${replicaIndex()}`,
+   *
+   * For multi-instance EOS, the derived id MUST be stable across a single
+   * instance's restarts but UNIQUE across instances.
+   */
+  transactionalId?: string | (() => string | Promise<string>);
   /** acks: -1/"all" (default), 0, or 1. */
   acks?: number;
   /** Compression codec. Driver maps to its native enum. */
@@ -196,6 +209,16 @@ export interface ProducerBehaviorConfig {
    * silences kafkajs's `KafkaJSPartitionerNotSpecified` warning.
    */
   partitioner?: KafkaJsPartitionerChoice;
+  /**
+   * Callback fired when a transactional `sendBatch` triggers the abort
+   * path (e.g. mid-batch driver error, broker rejection). Used by the
+   * publisher to fan out the matching `KafkaPublisherHooks.onTransactionAbort`
+   * hook — but advanced users constructing a driver directly may also wire
+   * it themselves. Best-effort: the driver still proceeds to abort the
+   * underlying transaction and return per-record failures regardless of
+   * whether this callback throws.
+   */
+  onTransactionAbort?: (error: Error) => void;
 }
 
 export type DriverKind = "kafkajs" | "confluent";

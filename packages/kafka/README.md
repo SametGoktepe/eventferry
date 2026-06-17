@@ -175,6 +175,40 @@ new KafkaPublisher({
 - `"legacy"` — pre-v2 hashing. Use when migrating an existing topic to keep hash continuity.
 - `"default"` — kafkajs's current default. May change in future major versions.
 
+## Transactions (EOS)
+
+### Callable `transactionalId`
+
+`transactionalId` accepts a sync or async resolver — useful when the id depends on runtime context that isn't known at construction time (pod name, AZ + replica index, k8s ordinal):
+
+```ts
+new KafkaPublisher({
+  brokers,
+  transactional: true,
+  transactionalId: () =>
+    `${process.env.POD_NAME}-${process.env.REPLICA_INDEX}`,
+});
+```
+
+For multi-instance EOS, the resolved id MUST be stable across a single instance's restarts but UNIQUE across instances. The plain-string form remains supported and unchanged.
+
+### Abort-aware `onTransactionAbort`
+
+When a transactional `sendBatch` triggers the abort path (mid-batch error, broker rejection), the publisher fires `hooks.onTransactionAbort(err)` so dashboards and metrics catch EOS failure rates:
+
+```ts
+new KafkaPublisher({
+  brokers,
+  transactional: true,
+  transactionalId: "orders-tx",
+  hooks: {
+    onTransactionAbort: (err) => metrics.txAborts.inc({ reason: err.name }),
+  },
+});
+```
+
+Best-effort: the hook is safe-wrapped (a throwing hook never breaks the abort path).
+
 ## Observability
 
 ### Hooks

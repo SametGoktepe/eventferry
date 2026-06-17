@@ -59,12 +59,22 @@ export class KafkaPublisher implements Publisher {
   private readonly tracer: KafkaTracer;
 
   constructor(opts: KafkaPublisherOptions) {
-    // Plumb the logger into driver construction so driver-side diagnostics
-    // (e.g. kafkajs unsupported-tuning warnings) route through it too.
-    this.driver = opts.customDriver ?? selectDriver({ ...opts });
     this.logger = opts.logger;
     this.hooks = opts.hooks ?? {};
     this.tracer = opts.tracer ?? new NoopKafkaTracer();
+    // Plumb the logger into driver construction so driver-side diagnostics
+    // (e.g. kafkajs unsupported-tuning warnings) route through it too.
+    // Plumb a safe-wrapped onTransactionAbort callback so the driver-level
+    // transaction abort path fans out to the user-supplied hook safely.
+    const onTransactionAbort = this.hooks.onTransactionAbort
+      ? (error: Error) => {
+          void safeHook(this.logger, "onTransactionAbort", () =>
+            this.hooks.onTransactionAbort?.(error),
+          );
+        }
+      : undefined;
+    this.driver =
+      opts.customDriver ?? selectDriver({ ...opts, onTransactionAbort });
   }
 
   async connect(): Promise<void> {
