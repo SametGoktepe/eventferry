@@ -1,4 +1,8 @@
-import type { KafkaConnectionConfig, TlsConfig } from "./driver.js";
+import type {
+  KafkaConnectionConfig,
+  ProducerBehaviorConfig,
+  TlsConfig,
+} from "./driver.js";
 
 /**
  * Translate eventferry's normalized `KafkaConnectionConfig` into the shape
@@ -23,13 +27,33 @@ export interface ConfluentClientConfig {
 }
 
 export function buildConfluentClientConfig(
-  opts: KafkaConnectionConfig,
+  opts: KafkaConnectionConfig & ProducerBehaviorConfig,
 ): ConfluentClientConfig {
   const kafkaJS: Record<string, unknown> = {
     clientId: opts.clientId ?? "eventferry",
     brokers: opts.brokers,
   };
   const librdkafka: Record<string, unknown> = {};
+
+  // ── Producer tuning passthrough (librdkafka config keys) ─────────────
+  if (opts.lingerMs !== undefined) librdkafka["linger.ms"] = opts.lingerMs;
+  if (opts.batchSize !== undefined) librdkafka["batch.size"] = opts.batchSize;
+  if (opts.maxInFlightRequests !== undefined) {
+    librdkafka["max.in.flight.requests.per.connection"] =
+      opts.maxInFlightRequests;
+  }
+  if (opts.requestTimeoutMs !== undefined) {
+    librdkafka["request.timeout.ms"] = opts.requestTimeoutMs;
+  }
+  if (opts.deliveryTimeoutMs !== undefined) {
+    librdkafka["delivery.timeout.ms"] = opts.deliveryTimeoutMs;
+  }
+  if (opts.maxRequestSize !== undefined) {
+    librdkafka["message.max.bytes"] = opts.maxRequestSize;
+  }
+  if (opts.transactionTimeoutMs !== undefined) {
+    librdkafka["transaction.timeout.ms"] = opts.transactionTimeoutMs;
+  }
 
   const tlsRequested = opts.ssl === true || isTlsConfig(opts.ssl);
   const saslRequested = !!opts.sasl;
