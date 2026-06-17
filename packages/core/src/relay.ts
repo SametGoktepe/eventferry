@@ -1,4 +1,4 @@
-import { nextRetryAt } from "./backoff.js";
+import { computeBackoff } from "./backoff.js";
 import { buildPublishable } from "./publishable.js";
 import { ConsoleLogger, JsonSerializer } from "./serializer.js";
 import type {
@@ -178,12 +178,38 @@ export class Relay {
     error: Error,
     errorKind?: PublishErrorKind,
   ): Promise<void> {
+    // Backpressure: client-side producer queue is full. Re-queue the record
+    // with a brief delay; do NOT increment attempts (this isn't the record's
+    // fault, the producer is just full). Stores without `requeue` fall back
+    // to markFailed, accepting the attempt-counter hit.
+    if (errorKind === "backpressure") {
+      const delay = this.retry.backpressureDelayMs ?? 1000;
+      const retryAt = new Date(Date.now() + delay);
+      this.hooks.onFailed?.(record, error, true);
+      this.log.warn("publish backpressure — requeueing without bumping attempts", {
+        recordId: record.id,
+        retryAt: retryAt.toISOString(),
+        errorKind,
+        error: error.message,
+      });
+      if (this.store.requeue) {
+        await this.store.requeue(record.id, retryAt);
+      } else {
+        // Fallback: markFailed (will increment attempts). Documented in the
+        // OutboxStore.requeue JSDoc.
+        await this.store.markFailed(record.id, retryAt, "failed");
+      }
+      return;
+    }
+
     const attempts = record.attempts + 1;
     // fatal/poison short-circuit: retrying cannot help (auth denied, fenced
     // epoch, oversized record, schema rejected). Skip the backoff schedule
     // entirely and go straight to DLQ + dead.
     const isTerminalKind = errorKind === "fatal" || errorKind === "poison";
-    const retryAt = isTerminalKind ? null : nextRetryAt(this.retry, attempts);
+    const retryAt = isTerminalKind
+      ? null
+      : this.nextRetryAtForKind(attempts, errorKind);
     const willRetry = retryAt !== null;
 
     this.hooks.onFailed?.(record, error, willRetry);
@@ -209,9 +235,10 @@ export class Relay {
             {
               ...msg,
               topic: this.dlq.topic,
-              // Preserve the original destination so the publisher can record
-              // it as a header; otherwise it is lost when we overwrite `topic`.
-              headers: { ...msg.headers, "original-topic": record.topic },
+              // Per-record enrichment so the DLQ consumer has everything
+              // needed for triage: original destination, aggregate / message
+              // identity, the attempts count, and (opt-in) a truncated stack.
+              headers: this.buildDlqHeaders(record, error, msg.headers),
             },
             error,
           );
@@ -227,6 +254,49 @@ export class Relay {
 
     await this.store.markFailed(record.id, null, "dead");
     this.hooks.onDead?.(record, error);
+  }
+
+  /**
+   * Compute the next retry instant, applying the quota multiplier when the
+   * driver classified the failure as a server throttle. Quota failures DO
+   * count as attempts (unlike backpressure) — the multiplier only stretches
+   * the delay, not the budget.
+   */
+  private nextRetryAtForKind(
+    attempts: number,
+    errorKind: PublishErrorKind | undefined,
+  ): Date | null {
+    if (attempts >= this.retry.maxAttempts) return null;
+    const baseDelay = computeBackoff(this.retry, attempts);
+    const multiplier =
+      errorKind === "quota" ? this.retry.quotaMultiplier ?? 5 : 1;
+    const delay = Math.min(baseDelay * multiplier, this.retry.maxMs * 10);
+    return new Date(Date.now() + delay);
+  }
+
+  /**
+   * Build the per-record DLQ header bag. Operators triaging the DLQ get the
+   * original destination, the aggregate / message identity, attempts count,
+   * and optionally a truncated error stack — everything you need to decide
+   * whether to re-enqueue, escalate, or drop.
+   */
+  private buildDlqHeaders(
+    record: OutboxRecord,
+    error: Error,
+    existing: Record<string, string>,
+  ): Record<string, string> {
+    const out: Record<string, string> = {
+      ...existing,
+      "original-topic": record.topic,
+      "dlq-attempts": String(record.attempts + 1),
+      "dlq-original-aggregate-id": record.aggregateId,
+      "dlq-original-message-id": record.messageId,
+    };
+    if (this.dlq.includeStackTraces && error.stack) {
+      const maxBytes = this.dlq.maxStackBytes ?? 4096;
+      out["dlq-error-stack"] = truncateUtf8(error.stack, maxBytes);
+    }
+    return out;
   }
 
   private async toPublishable(
@@ -268,4 +338,30 @@ export class Relay {
       };
     });
   }
+}
+
+/**
+ * Truncate a string to at most `maxBytes` of its UTF-8 encoding, appending a
+ * "…[truncated]" marker when bytes are removed. Used to keep the DLQ stack
+ * header bounded — headers in Kafka are byte-sized, not character-sized, so
+ * a naive `slice` on multibyte text can blow the limit. Always returns a
+ * valid (no-broken-codepoint) UTF-8 string.
+ */
+function truncateUtf8(input: string, maxBytes: number): string {
+  const marker = "…[truncated]";
+  const markerBytes = Buffer.byteLength(marker, "utf8");
+  const buf = Buffer.from(input, "utf8");
+  if (buf.byteLength <= maxBytes) return input;
+  const budget = Math.max(0, maxBytes - markerBytes);
+  // Slice and decode; if the slice lands mid-codepoint, drop trailing bytes
+  // until the decode is clean.
+  let end = budget;
+  while (end > 0) {
+    const slice = buf.subarray(0, end).toString("utf8");
+    if (!slice.endsWith("�")) {
+      return slice + marker;
+    }
+    end--;
+  }
+  return marker;
 }

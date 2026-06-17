@@ -175,12 +175,25 @@ export interface OutboxStore {
   /**
    * Mark a record as failed and schedule its next retry.
    * `nextRetryAt` of null + status "dead" means terminal.
+   * Implementations MUST increment `attempts` so the retry budget is honored.
    */
   markFailed(
     recordId: string,
     nextRetryAt: Date | null,
     status: "failed" | "dead",
   ): Promise<void>;
+
+  /**
+   * Re-queue a record back to `failed` with the given `retryAt` **WITHOUT
+   * incrementing attempts**. Used by the relay for backpressure handling —
+   * a client-side queue-full failure is a "slow down" signal, not a
+   * record-specific failure, and counting it as a retry would burn the
+   * attempt budget unfairly.
+   *
+   * Optional: stores that don't implement this fall back to `markFailed`
+   * (which increments attempts, with the caveat documented above).
+   */
+  requeue?(recordId: string, retryAt: Date): Promise<void>;
 
   /** Best-effort lifecycle hooks; no-op allowed. */
   init?(): Promise<void>;
@@ -215,11 +228,42 @@ export interface RetryConfig {
   maxMs: number;
   /** Add random jitter (0..baseMs) to avoid thundering herd. Default true. */
   jitter?: boolean;
+  /**
+   * Delay (ms) before re-queueing a record whose publish was rejected with
+   * `errorKind: "backpressure"` (client-side producer buffer full).
+   *
+   * Backpressure failures do NOT count as a failed attempt — the buffer
+   * being full is a "slow down" signal, not a record-specific failure.
+   * The record is requeued at the next interval, not promoted to dead.
+   *
+   * Default 1000 ms. Requires the {@link OutboxStore} to implement
+   * `requeue` — stores without it fall back to {@link OutboxStore.markFailed}
+   * which DOES increment attempts.
+   */
+  backpressureDelayMs?: number;
+  /**
+   * Multiplier applied to the computed backoff for records rejected with
+   * `errorKind: "quota"` (broker is throttling the producer). Default 5 —
+   * a quota signal asks for a longer breath than a generic transient error.
+   * Quota failures DO count as attempts (unlike backpressure).
+   */
+  quotaMultiplier?: number;
 }
 
 export interface DlqConfig {
   /** Topic to route dead messages to. If absent, dead messages are parked. */
   topic?: string;
+  /**
+   * Include a truncated stack trace as the `dlq-error-stack` header when
+   * routing a record to the DLQ. Default false — keep DLQ messages small
+   * by default; opt in if your triage workflow needs the stack.
+   */
+  includeStackTraces?: boolean;
+  /**
+   * Maximum bytes of the truncated stack trace included when
+   * `includeStackTraces` is on. Default 4096.
+   */
+  maxStackBytes?: number;
 }
 
 /**

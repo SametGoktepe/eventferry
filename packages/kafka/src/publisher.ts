@@ -140,6 +140,9 @@ export class KafkaPublisher implements Publisher {
       headers: {
         ...message.headers,
         "dlq-reason": error.message,
+        // Error class name (e.g. "KafkaJSProtocolError", "RecordTooLargeException"),
+        // useful for downstream alert routing without parsing the reason string.
+        "dlq-error-class": error.name || error.constructor?.name || "Error",
         "dlq-original-topic": message.headers["original-topic"] ?? "",
         "dlq-failed-at": new Date().toISOString(),
       },

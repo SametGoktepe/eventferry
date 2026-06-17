@@ -166,6 +166,19 @@ describe("PostgresStore.markDone / markFailed", () => {
     expect(pool.calls[0]?.text).toContain("attempts = attempts + 1");
     expect(pool.calls[0]?.values).toEqual(["1", 3, retryAt]);
   });
+
+  it("requeue puts the row back to failed without bumping attempts", async () => {
+    const pool = new FakeDb();
+    const store = new PostgresStore({ pool });
+    const retryAt = new Date();
+    await store.requeue("1", retryAt);
+    // Status code 3 = failed; query must NOT include attempts = attempts + 1
+    expect(pool.calls[0]?.text).toMatch(/status = 3/);
+    expect(pool.calls[0]?.text).not.toMatch(/attempts/);
+    // Resets claimed_at so the reaper doesn't race
+    expect(pool.calls[0]?.text).toMatch(/claimed_at = NULL/);
+    expect(pool.calls[0]?.values).toEqual(["1", retryAt]);
+  });
 });
 
 describe("table name validation", () => {

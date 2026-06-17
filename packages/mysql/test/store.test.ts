@@ -335,6 +335,21 @@ describe("MysqlStore.markFailed", () => {
     expect(pool.calls[0]?.values?.[0]).toBe(4);
     expect(pool.calls[0]?.values?.[1]).toBe(null);
   });
+
+  it("requeue puts the row back to failed without bumping attempts", async () => {
+    const pool = new FakePool({ poolResponder: () => ({ affectedRows: 1 }) });
+    const store = new MysqlStore({ pool });
+    const retryAt = new Date("2026-06-17T10:00:00Z");
+    await store.requeue("42", retryAt);
+
+    const call = pool.calls[0];
+    // Status code 3 = failed; SQL must NOT touch attempts
+    expect(call?.sql).toMatch(/status = 3/);
+    expect(call?.sql).not.toMatch(/attempts/);
+    // Resets claimed_at so the reaper doesn't race
+    expect(call?.sql).toMatch(/claimed_at = NULL/);
+    expect(call?.values).toEqual([retryAt, "42"]);
+  });
 });
 
 describe("MysqlStore.purgeDone", () => {
