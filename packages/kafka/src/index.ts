@@ -1,4 +1,5 @@
 export * from "./driver.js";
+export * from "./admin.js";
 export * from "./kafkajs-driver.js";
 export * from "./kafkajs-classifier.js";
 export * from "./confluent-driver.js";

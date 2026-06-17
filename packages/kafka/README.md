@@ -271,6 +271,89 @@ Per the spec, eventferry emits **one span per `publish()` call**, named `"{topic
 
 The user-supplied tracer SHOULD set `SpanKind.PRODUCER` on the span; the adapter above does this explicitly.
 
+#### Propagating trace context to consumers
+
+Add an optional `inject` method on the tracer to write the W3C `traceparent` / `tracestate` headers into each outgoing message. Pair this with `extractTraceContext` on the consumer side (see [Consumer helpers](#consumer-helpers--eventferrykafkaconsume)).
+
+```ts
+import { context as otelContext, propagation, trace } from "@opentelemetry/api";
+
+const tracer: KafkaTracer = {
+  startPublishSpan: /* …as above… */,
+  inject(_span, headers) {
+    // The publisher wraps the active span context for us before calling this.
+    propagation.inject(otelContext.active(), headers);
+  },
+};
+```
+
+The publisher clones each outbound message before injecting (the caller's `PublishableMessage` is never mutated, so the relay's retry path stays correct).
+
+## Power-user escape hatches
+
+When the high-level options don't reach a knob you need, drop down to the native client config.
+
+### Compression level
+
+```ts
+new KafkaPublisher({
+  brokers,
+  driver: "confluent",
+  compression: "zstd",
+  compressionLevel: 9, // librdkafka compression.level
+});
+```
+
+Confluent only. The kafkajs driver logs a one-time warning and ignores it (kafkajs does not expose codec levels). Default level is the codec's broker-friendly default.
+
+### Raw librdkafka producer config (confluent driver)
+
+```ts
+new KafkaPublisher({
+  brokers,
+  driver: "confluent",
+  rawProducerConfig: {
+    "queue.buffering.max.messages": 100_000,
+    "statistics.interval.ms": 5_000,
+    "socket.keepalive.enable": true,
+  },
+});
+```
+
+Merged on TOP of eventferry's translated config — raw keys **win** against the translated ones. Use this to override defaults (set `linger.ms` directly) or to tune surface area we don't expose (`queue.buffering.max.kbytes`, etc.).
+
+### Raw kafkajs producer config (kafkajs driver)
+
+```ts
+new KafkaPublisher({
+  brokers,
+  driver: "kafkajs",
+  rawKafkaJsProducerConfig: {
+    retry: { retries: 7, initialRetryTime: 250 },
+    metadataMaxAge: 5_000,
+  },
+});
+```
+
+Same precedence — raw keys win. Use for kafkajs-internal knobs (`retry`, `metadataMaxAge`) or to override defaults like `idempotent`.
+
+### Custom partitioner (kafkajs driver)
+
+```ts
+const tenantAwarePartitioner = () => ({ topic, partitionMetadata, message }) => {
+  const tenant = message.headers["x-tenant"]?.toString();
+  return hashToPartition(tenant, partitionMetadata.length);
+};
+
+new KafkaPublisher({
+  brokers,
+  driver: "kafkajs",
+  customPartitioner: tenantAwarePartitioner,
+});
+```
+
+Overrides the `partitioner` preset. Confluent ignores this — librdkafka's partitioner is a C-level extension point, not a JS callback.
+
 ### Logger
 
 Pass a `Logger` (the same interface used by `@eventferry/core`) to route the publisher's own diagnostics — driver warnings, hook failures — through your logging stack:
@@ -283,6 +366,107 @@ new KafkaPublisher({
 ```
 
 When omitted, the publisher is silent and the driver falls back to `console.warn` for its diagnostics (preserves prior behavior).
+
+## Admin operations
+
+The publisher exposes a typed admin surface for listing/describing/creating topics — handy for provisioning in CI, integration tests, or app boot.
+
+### `publisher.admin()`
+
+Borrow a fresh admin client. The returned client is connected and ready; the **caller** is responsible for closing it.
+
+```ts
+const admin = await publisher.admin();
+try {
+  const topics = await admin.listTopics();
+  const desc = await admin.describeTopics(["orders"]);
+  console.log(desc[0].partitions.length); // partition count
+} finally {
+  await admin.close();
+}
+```
+
+Methods on the returned `KafkaAdmin`:
+
+- `listTopics(): Promise<string[]>` — all topic names visible to this principal.
+- `describeTopics(topics): Promise<TopicMetadata[]>` — partition / leader / ISR per topic. Missing topics come back with an empty `partitions` array (no try/catch needed to detect absence).
+- `createTopics(specs)` — idempotent: existing topics are silently skipped.
+- `createPartitions(specs)` — grow a topic's partition count (Kafka does not support shrinking).
+- `close()` — disconnect.
+
+### `publisher.ensureTopics()`
+
+One-shot, idempotent provisioning built on top of the admin surface:
+
+```ts
+await publisher.ensureTopics([
+  { topic: "orders", numPartitions: 12, replicationFactor: 3 },
+  { topic: "orders.dlq", numPartitions: 3, replicationFactor: 3, configEntries: { "retention.ms": "604800000" } },
+]);
+
+// Optionally grow existing topics whose partition count is below the requested numPartitions:
+await publisher.ensureTopics(
+  [{ topic: "orders", numPartitions: 24 }],
+  { growPartitions: true },
+);
+```
+
+What it does:
+
+- Creates topics that don't exist.
+- Skips topics that already exist (no error, no surprise alter).
+- With `growPartitions: true`, calls `createPartitions` for existing topics whose current partition count is **below** the requested `numPartitions`.
+
+What it does NOT do (by design):
+
+- Reconcile replication factor on existing topics — Kafka has no safe in-place alter (use partition reassignment for that).
+- Reconcile `configEntries` on existing topics — use `kafka-configs.sh` or the raw admin client (kafkajs's `alterConfigs`) if you need that.
+
+### Consumer helpers — `@eventferry/kafka/consume`
+
+eventferry is publisher-only, but the records it produces are consumed somewhere downstream. The `consume` subpath ships zero-dep helpers for the typical decode + trace-continuation glue, and pulls in no kafkajs/confluent code:
+
+```ts
+import { decode, extractTraceContext } from "@eventferry/kafka/consume";
+
+await consumer.run({
+  eachMessage: async ({ message }) => {
+    // Normalize key/headers/value; default decoder is JSON.
+    const { key, value, headers, offset } = decode<{ orderId: string }>(message);
+
+    // Continue the producer's W3C trace context (if the publisher's tracer
+    // injects it — see "OpenTelemetry tracing" above for the inject hook).
+    const trace = extractTraceContext(message.headers);
+    if (trace) {
+      // → start a CONSUMER span as a child of trace.traceId / trace.spanId
+    }
+
+    await handle(value!);
+  },
+});
+```
+
+`decode` options:
+
+- `decoder: "json"` (default) — `JSON.parse(value.toString("utf8"))`. Empty/null value → `null` (handles compaction tombstones).
+- `decoder: "utf8"` — raw text.
+- `decoder: "none"` — raw `Buffer`.
+- `decoder: (bytes) => …` — custom (Avro, Protobuf, MessagePack, …).
+
+`extractTraceContext` returns `null` if no `traceparent` header is present or it fails W3C validation (all-zero IDs, `version: ff`, malformed hex). It accepts both raw consumer headers (Buffer values) and already-decoded headers (string values).
+
+### `validateTopicsOnConnect`
+
+Fail-fast at startup if expected topics are missing:
+
+```ts
+new KafkaPublisher({
+  brokers,
+  validateTopicsOnConnect: ["orders", "orders.dlq", "events"],
+});
+```
+
+`connect()` opens an admin, runs `listTopics`, and throws a single descriptive error naming **every** missing topic. The admin is always closed (success or failure). Skip the check entirely with an empty list or by omitting the option.
 
 📖 **Full documentation:** [github.com/SametGoktepe/eventferry](https://github.com/SametGoktepe/eventferry#readme)
 

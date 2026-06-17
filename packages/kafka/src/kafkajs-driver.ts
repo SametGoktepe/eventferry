@@ -11,6 +11,12 @@ import type {
   KafkaJsPartitionerChoice,
   ProducerBehaviorConfig,
 } from "./driver.js";
+import type {
+  KafkaDriverAdmin,
+  PartitionGrowSpec,
+  TopicCreateSpec,
+  TopicMetadata,
+} from "./admin.js";
 
 // Loosely-typed structural references to the kafkajs API so this file
 // compiles without kafkajs installed (it's an optional peer dep).
@@ -28,6 +34,41 @@ interface KjsTransaction {
 }
 interface KjsKafka {
   producer(args?: unknown): KjsProducer;
+  admin(): KjsAdmin;
+}
+// Minimal structural shape of the kafkajs Admin client — we use only the
+// methods needed for listTopics / describeTopics / createTopics / createPartitions.
+// Errors thrown from these calls bubble up unchanged (admin errors are
+// operator-facing, not relay-facing — no error-kind classification here).
+interface KjsAdmin {
+  connect(): Promise<void>;
+  disconnect(): Promise<void>;
+  listTopics(): Promise<string[]>;
+  fetchTopicMetadata(args: {
+    topics: string[];
+  }): Promise<{
+    topics: Array<{
+      name: string;
+      partitions: Array<{
+        partitionId: number;
+        leader: number;
+        replicas: number[];
+        isr: number[];
+      }>;
+    }>;
+  }>;
+  createTopics(args: {
+    topics: Array<{
+      topic: string;
+      numPartitions?: number;
+      replicationFactor?: number;
+      configEntries?: Array<{ name: string; value: string }>;
+    }>;
+    waitForLeaders?: boolean;
+  }): Promise<boolean>;
+  createPartitions(args: {
+    topicPartitions: Array<{ topic: string; count: number }>;
+  }): Promise<void>;
 }
 // kafkajs's `Partitioners` namespace: three factory functions; we pluck them
 // at runtime rather than depending on the kafkajs types.
@@ -58,6 +99,9 @@ const UNSUPPORTED_BY_KAFKAJS = [
   "batchSize",
   "deliveryTimeoutMs",
   "maxRequestSize",
+  // Confluent-only escape hatches; ignored on kafkajs.
+  "compressionLevel",
+  "rawProducerConfig",
 ] as const;
 
 /**
@@ -103,17 +147,31 @@ export class KafkaJsDriver implements KafkaDriver {
       // the provider's returned token (other fields are ignored).
       sasl: this.opts.sasl,
     });
-    const createPartitioner = resolveCreatePartitioner(
-      mod.Partitioners,
-      this.opts.partitioner,
-      this.transactional,
-    );
+    return kafka.producer(await this.buildProducerOptions(mod.Partitioners));
+  }
+
+  /**
+   * Compute the options object passed to `kafka.producer({...})`. Exposed
+   * as a test seam so power-user escape hatches (customPartitioner,
+   * rawKafkaJsProducerConfig) can be asserted without a live broker.
+   */
+  protected async buildProducerOptions(
+    partitioners: KjsPartitionersNamespace | undefined,
+  ): Promise<Record<string, unknown>> {
+    // Custom partitioner (escape hatch) wins over the preset `partitioner` choice.
+    const createPartitioner =
+      this.opts.customPartitioner ??
+      resolveCreatePartitioner(
+        partitioners,
+        this.opts.partitioner,
+        this.transactional,
+      );
     // Resolve a callable transactionalId — async-safe so runtime context
     // (pod name, AZ index, k8s ordinal) can be derived at connect time.
     const resolvedTxId = this.transactional
       ? await resolveTransactionalId(this.opts.transactionalId)
       : undefined;
-    return kafka.producer({
+    return {
       idempotent: this.opts.idempotent ?? true,
       // Idempotent / transactional producers cap maxInFlight at 5. When the
       // user picks transactional we force 1 to keep strict ordering across
@@ -130,12 +188,32 @@ export class KafkaJsDriver implements KafkaDriver {
       // Setting any partitioner choice silences kafkajs's
       // KafkaJSPartitionerNotSpecified warning.
       createPartitioner,
-    });
+      // Power-user escape hatch — merged LAST so raw keys win against the
+      // translated ones. That's the contract: anything you put here is
+      // final, even if it overrides idempotent/transactionalId/etc.
+      ...(this.opts.rawKafkaJsProducerConfig ?? {}),
+    };
   }
 
   async disconnect(): Promise<void> {
     await this.producer?.disconnect();
     this.producer = null;
+  }
+
+  /**
+   * Construct a kafkajs admin client wrapped in the eventferry-facing
+   * `KafkaDriverAdmin` shape. The publisher calls `.connect()` on the
+   * returned object before exposing it via `publisher.admin()`.
+   */
+  async admin(): Promise<KafkaDriverAdmin> {
+    const mod = await importKafkaJs();
+    const kafka: KjsKafka = new mod.Kafka({
+      clientId: this.opts.clientId ?? "eventferry-admin",
+      brokers: this.opts.brokers,
+      ssl: this.opts.ssl,
+      sasl: this.opts.sasl,
+    });
+    return new KafkaJsAdmin(kafka.admin());
   }
 
   async sendBatch(messages: PublishableMessage[]): Promise<PublishResult[]> {
@@ -263,6 +341,86 @@ function warnUnsupportedKafkajsOptions(opts: KafkaJsDriverOptions): void {
 /** Internal — used by tests. Resets the dedup so warnings can be observed in isolation. */
 export function _resetKafkajsWarnDedup(): void {
   warnedKafkajsKeys.clear();
+}
+
+/**
+ * Adapt the kafkajs admin client to the {@link KafkaDriverAdmin} contract.
+ * Idempotent semantics for `createTopics` / `createPartitions` are
+ * implemented here so the publisher's `ensureTopics` helper stays small.
+ */
+class KafkaJsAdmin implements KafkaDriverAdmin {
+  constructor(private readonly client: KjsAdmin) {}
+
+  async connect(): Promise<void> {
+    await this.client.connect();
+  }
+
+  async close(): Promise<void> {
+    await this.client.disconnect();
+  }
+
+  async listTopics(): Promise<string[]> {
+    return await this.client.listTopics();
+  }
+
+  async describeTopics(topics: string[]): Promise<TopicMetadata[]> {
+    if (topics.length === 0) return [];
+    const all = new Set(await this.client.listTopics());
+    // Fetch metadata only for the ones that exist; map absent topics to
+    // empty-partitions descriptors (matches the documented behavior).
+    const existing = topics.filter((t) => all.has(t));
+    const missing = topics.filter((t) => !all.has(t));
+    const meta = existing.length
+      ? await this.client.fetchTopicMetadata({ topics: existing })
+      : { topics: [] };
+    const byName = new Map(meta.topics.map((t) => [t.name, t]));
+    return topics.map((topic) => {
+      if (missing.includes(topic)) return { topic, partitions: [] };
+      const found = byName.get(topic);
+      if (!found) return { topic, partitions: [] };
+      return {
+        topic,
+        partitions: found.partitions.map((p) => ({
+          partitionId: p.partitionId,
+          leader: p.leader,
+          replicas: p.replicas,
+          isr: p.isr,
+        })),
+      };
+    });
+  }
+
+  async createTopics(specs: TopicCreateSpec[]): Promise<void> {
+    if (specs.length === 0) return;
+    const topics = specs.map((s) => ({
+      topic: s.topic,
+      numPartitions: s.numPartitions,
+      replicationFactor: s.replicationFactor,
+      configEntries: s.configEntries
+        ? Object.entries(s.configEntries).map(([name, value]) => ({ name, value }))
+        : undefined,
+    }));
+    try {
+      await this.client.createTopics({ topics, waitForLeaders: true });
+    } catch (err) {
+      // kafkajs raises KafkaJSProtocolError with type "TOPIC_ALREADY_EXISTS".
+      // Idempotent contract: silently swallow that case; surface everything else.
+      const e = err as { type?: string; message?: string };
+      if (e?.type === "TOPIC_ALREADY_EXISTS") return;
+      if (/already exists/i.test(e?.message ?? "")) return;
+      throw err;
+    }
+  }
+
+  async createPartitions(specs: PartitionGrowSpec[]): Promise<void> {
+    if (specs.length === 0) return;
+    await this.client.createPartitions({
+      topicPartitions: specs.map((s) => ({
+        topic: s.topic,
+        count: s.totalCount,
+      })),
+    });
+  }
 }
 
 async function importKafkaJs(): Promise<{

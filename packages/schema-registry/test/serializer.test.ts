@@ -117,3 +117,157 @@ describe("SchemaRegistrySerializer", () => {
     expect(() => new SchemaRegistrySerializer({})).toThrow();
   });
 });
+
+describe("SchemaRegistrySerializer — autoRegister", () => {
+  it("autoRegister: false ALWAYS uses getLatestSchemaId, even when a schema is provided", async () => {
+    const registry = new FakeRegistry();
+    const serializer = new SchemaRegistrySerializer({
+      registry,
+      autoRegister: false,
+      schemas: { "orders.created": { type: "AVRO", schema: '{"type":"record"}' } },
+    });
+
+    await serializer.serialize(record());
+
+    expect(registry.registered).toHaveLength(0);
+    expect(registry.latestLookups).toEqual(["orders.created-value"]);
+    expect(registry.encodes[0]?.id).toBe(99);
+  });
+
+  it("autoRegister: true (default) registers when a schema is provided", async () => {
+    const registry = new FakeRegistry();
+    const serializer = new SchemaRegistrySerializer({
+      registry,
+      schemas: { "orders.created": { type: "AVRO", schema: "{}" } },
+    });
+    await serializer.serialize(record());
+    expect(registry.registered).toHaveLength(1);
+  });
+});
+
+describe("SchemaRegistrySerializer — subject strategies", () => {
+  it("RecordNameStrategy uses the recordName resolver as the subject", async () => {
+    const registry = new FakeRegistry();
+    const serializer = new SchemaRegistrySerializer({
+      registry,
+      subjectStrategy: "RecordNameStrategy",
+      recordName: (r) => `com.example.${r.aggregateType}.Created`,
+    });
+
+    await serializer.serialize(record({ aggregateType: "order" }));
+    expect(registry.latestLookups).toEqual(["com.example.order.Created"]);
+  });
+
+  it("TopicRecordNameStrategy concatenates topic and record name", async () => {
+    const registry = new FakeRegistry();
+    const serializer = new SchemaRegistrySerializer({
+      registry,
+      subjectStrategy: "TopicRecordNameStrategy",
+      recordName: (r) => `com.example.${r.aggregateType}.Created`,
+    });
+
+    await serializer.serialize(record({ topic: "orders.v2", aggregateType: "order" }));
+    expect(registry.latestLookups).toEqual([
+      "orders.v2-com.example.order.Created",
+    ]);
+  });
+
+  it("RecordNameStrategy without a recordName resolver throws on first serialize", async () => {
+    const registry = new FakeRegistry();
+    const serializer = new SchemaRegistrySerializer({
+      registry,
+      subjectStrategy: "RecordNameStrategy",
+    });
+    await expect(serializer.serialize(record())).rejects.toThrow(
+      /recordName.*resolver/,
+    );
+  });
+
+  it("explicit `subject` function overrides any subjectStrategy preset", async () => {
+    const registry = new FakeRegistry();
+    const serializer = new SchemaRegistrySerializer({
+      registry,
+      subjectStrategy: "RecordNameStrategy",
+      recordName: () => "never-called",
+      subject: (topic, isKey) => `wins.${topic}.${isKey ? "k" : "v"}`,
+    });
+    await serializer.serialize(record({ topic: "t" }));
+    expect(registry.latestLookups).toEqual(["wins.t.v"]);
+  });
+
+  it("legacy single-arg `subject` callable still works (back-compat)", async () => {
+    const registry = new FakeRegistry();
+    const serializer = new SchemaRegistrySerializer({
+      registry,
+      subject: ((topic: string) => `legacy.${topic}`) as (t: string) => string,
+    });
+    await serializer.serialize(record({ topic: "x" }));
+    expect(registry.latestLookups).toEqual(["legacy.x"]);
+  });
+});
+
+describe("SchemaRegistrySerializer — serializeKey", () => {
+  it("returns null when the record has no key (kafka 'no key' record)", async () => {
+    const registry = new FakeRegistry();
+    const serializer = new SchemaRegistrySerializer({
+      registry,
+      keySchemas: { "orders.created": { type: "AVRO", schema: '{"type":"string"}' } },
+    });
+    const result = await serializer.serializeKey(record({ key: null }));
+    expect(result).toBeNull();
+    expect(registry.registered).toHaveLength(0);
+    expect(registry.encodes).toHaveLength(0);
+  });
+
+  it("registers a key schema under the -key subject and encodes the key", async () => {
+    const registry = new FakeRegistry();
+    const serializer = new SchemaRegistrySerializer({
+      registry,
+      keySchemas: {
+        "orders.created": { type: "AVRO", schema: '{"type":"string"}' },
+      },
+    });
+    const buf = await serializer.serializeKey(
+      record({ key: "agg-123" }),
+    );
+    expect(registry.registered).toHaveLength(1);
+    expect(registry.registered[0]?.subject).toBe("orders.created-key");
+    expect(registry.encodes[0]).toEqual({ id: 10, payload: "agg-123" });
+    expect(buf?.toString("utf8")).toBe("enc:10");
+  });
+
+  it("value and key subject ids are cached separately (no cross-contamination)", async () => {
+    const registry = new FakeRegistry();
+    const serializer = new SchemaRegistrySerializer({
+      registry,
+      schemas: { t: { type: "AVRO", schema: '{"type":"record"}' } },
+      keySchemas: { t: { type: "AVRO", schema: '{"type":"string"}' } },
+    });
+    await serializer.serialize(record({ topic: "t", key: "k1" }));
+    await serializer.serializeKey(record({ topic: "t", key: "k1" }));
+    // One value register, one key register, but only TWO total — not four,
+    // not duplicated on the second serialize call.
+    expect(registry.registered).toHaveLength(2);
+    const subjects = registry.registered.map((r) => r.subject).sort();
+    expect(subjects).toEqual(["t-key", "t-value"]);
+  });
+
+  it("serializeKey honors autoRegister: false (lookup latest, ignore local schema)", async () => {
+    const registry = new FakeRegistry();
+    const serializer = new SchemaRegistrySerializer({
+      registry,
+      autoRegister: false,
+      keySchemas: { t: { type: "AVRO", schema: "{}" } },
+    });
+    await serializer.serializeKey(record({ topic: "t", key: "k1" }));
+    expect(registry.registered).toHaveLength(0);
+    expect(registry.latestLookups).toEqual(["t-key"]);
+  });
+
+  it("serializeKey works WITHOUT a keySchemas entry — falls back to subject's latest", async () => {
+    const registry = new FakeRegistry();
+    const serializer = new SchemaRegistrySerializer({ registry });
+    await serializer.serializeKey(record({ topic: "t", key: "k1" }));
+    expect(registry.latestLookups).toEqual(["t-key"]);
+  });
+});

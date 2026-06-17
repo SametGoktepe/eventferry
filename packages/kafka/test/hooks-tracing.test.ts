@@ -265,6 +265,63 @@ describe("KafkaPublisher — OpenTelemetry span", () => {
   });
 });
 
+describe("KafkaPublisher — tracer.inject", () => {
+  it("invokes inject() once per message with a fresh headers map", async () => {
+    const driver = new FakeDriver();
+    const calls: { spanRef: SpanLike; headers: Record<string, string> }[] = [];
+    const tracer: KafkaTracer = {
+      startPublishSpan: () => new CapturingSpan(),
+      inject(span, headers) {
+        headers["traceparent"] =
+          "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+        calls.push({ spanRef: span, headers });
+      },
+    };
+    const pub = new KafkaPublisher({
+      brokers: ["b:9092"],
+      customDriver: driver,
+      tracer,
+    });
+
+    const original = msg({ recordId: "r1", headers: { "x-tenant": "t1" } });
+    await pub.publish([original, msg({ recordId: "r2" })]);
+
+    expect(calls).toHaveLength(2);
+    // Caller's PublishableMessage must NOT be mutated — the relay reuses
+    // the same reference on retry; a mutation here would compound.
+    expect(original.headers).toEqual({ "x-tenant": "t1" });
+
+    // Driver received the enriched headers.
+    const [sentBatch] = driver.sentBatches;
+    expect(sentBatch![0]!.headers).toEqual({
+      "x-tenant": "t1",
+      traceparent:
+        "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+    });
+    expect(sentBatch![1]!.headers).toEqual({
+      traceparent:
+        "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+    });
+  });
+
+  it("publish works untouched when tracer.inject is omitted (no shallow copy cost)", async () => {
+    const driver = new FakeDriver();
+    const tracer: KafkaTracer = {
+      startPublishSpan: () => new CapturingSpan(),
+    };
+    const pub = new KafkaPublisher({
+      brokers: ["b:9092"],
+      customDriver: driver,
+      tracer,
+    });
+    const original = msg({ headers: { "x-tenant": "t1" } });
+    await pub.publish([original]);
+    // When inject is absent the publisher hands the caller's array straight
+    // to the driver — verify the reference identity to lock that in.
+    expect(driver.sentBatches[0]![0]).toBe(original);
+  });
+});
+
 describe("KafkaPublisher — no tracer / no hooks", () => {
   it("publish() works with neither tracer nor hooks (pure backward compat)", async () => {
     const driver = new FakeDriver();

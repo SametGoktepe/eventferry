@@ -56,6 +56,22 @@ export interface KafkaTracer {
     name: string,
     attributes: Record<string, SpanAttributeValue>,
   ): SpanLike;
+
+  /**
+   * OPTIONAL: inject the active trace context (W3C `traceparent` +
+   * `tracestate`) into a per-message header map. Called by the publisher
+   * AFTER the batch span is created and BEFORE the records hit the wire.
+   *
+   * Implementations typically wrap OpenTelemetry's `propagation.inject(...)`
+   * or your tracing SDK's equivalent. Mutate the `headers` object in
+   * place — the publisher allocates a fresh copy per message so this is
+   * safe and matches the propagation API of every major SDK.
+   *
+   * Tracers without distributed-context propagation (or that only care
+   * about local spans) may leave this off — consumers can still derive
+   * trace headers themselves by other means.
+   */
+  inject?(span: SpanLike, headers: Record<string, string>): void;
 }
 
 /**

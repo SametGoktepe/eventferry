@@ -16,6 +16,12 @@ import { safeHook } from "./hooks.js";
 import type { KafkaPublisherHooks } from "./hooks.js";
 import { NoopKafkaTracer } from "./tracing.js";
 import type { KafkaTracer, SpanLike } from "./tracing.js";
+import type {
+  KafkaAdmin,
+  KafkaDriverAdmin,
+  PartitionGrowSpec,
+  TopicCreateSpec,
+} from "./admin.js";
 
 export interface KafkaPublisherOptions
   extends KafkaConnectionConfig,
@@ -44,6 +50,16 @@ export interface KafkaPublisherOptions
    * Use a thin adapter over your tracing SDK (see {@link KafkaTracer}).
    */
   tracer?: KafkaTracer;
+  /**
+   * If set, `connect()` checks that every topic in this list exists on the
+   * cluster and throws a descriptive error if any are missing. Use this to
+   * fail-fast at startup instead of letting the first send-time error
+   * surprise you.
+   *
+   * Validation runs AFTER the producer connects but BEFORE `onConnect` hooks
+   * fire. Driver must implement `admin()` (the built-ins do).
+   */
+  validateTopicsOnConnect?: string[];
 }
 
 /**
@@ -57,11 +73,15 @@ export class KafkaPublisher implements Publisher {
   private readonly logger: Logger | undefined;
   private readonly hooks: KafkaPublisherHooks;
   private readonly tracer: KafkaTracer;
+  private readonly validateTopicsOnConnect: readonly string[] | undefined;
 
   constructor(opts: KafkaPublisherOptions) {
     this.logger = opts.logger;
     this.hooks = opts.hooks ?? {};
     this.tracer = opts.tracer ?? new NoopKafkaTracer();
+    this.validateTopicsOnConnect = opts.validateTopicsOnConnect
+      ? Object.freeze([...opts.validateTopicsOnConnect])
+      : undefined;
     // Plumb the logger into driver construction so driver-side diagnostics
     // (e.g. kafkajs unsupported-tuning warnings) route through it too.
     // Plumb a safe-wrapped onTransactionAbort callback so the driver-level
@@ -79,7 +99,99 @@ export class KafkaPublisher implements Publisher {
 
   async connect(): Promise<void> {
     await this.driver.connect();
+    if (this.validateTopicsOnConnect && this.validateTopicsOnConnect.length) {
+      await this.assertTopicsExist(this.validateTopicsOnConnect);
+    }
     await safeHook(this.logger, "onConnect", () => this.hooks.onConnect?.());
+  }
+
+  /**
+   * Borrow a new admin client from the driver. The returned admin is
+   * connected and ready to use; the CALLER must `close()` it. Throws if the
+   * driver does not implement admin (custom driver lacking the capability).
+   */
+  async admin(): Promise<KafkaAdmin> {
+    const driverAdmin = await this.openDriverAdmin();
+    return driverAdmin;
+  }
+
+  /**
+   * Idempotently provision topics. Each spec creates the topic if absent;
+   * existing topics are skipped without error. If `growPartitions: true`
+   * (default false), topics whose current partition count is below the
+   * requested `numPartitions` are grown via `createPartitions`.
+   *
+   * Replication factor and config entries on EXISTING topics are NOT
+   * reconciled — Kafka does not provide a safe in-place alter for those
+   * (changing replication requires reassignment; configs use alterConfigs).
+   * Reach for the raw admin if you need that.
+   */
+  async ensureTopics(
+    specs: TopicCreateSpec[],
+    opts: { growPartitions?: boolean } = {},
+  ): Promise<void> {
+    if (specs.length === 0) return;
+    const admin = await this.openDriverAdmin();
+    try {
+      const topicNames = specs.map((s) => s.topic);
+      const existing = await admin.describeTopics(topicNames);
+      const existingByName = new Map(existing.map((t) => [t.topic, t]));
+
+      const toCreate = specs.filter(
+        (s) => (existingByName.get(s.topic)?.partitions.length ?? 0) === 0,
+      );
+      if (toCreate.length) await admin.createTopics(toCreate);
+
+      if (opts.growPartitions) {
+        const grow: PartitionGrowSpec[] = [];
+        for (const s of specs) {
+          if (s.numPartitions === undefined) continue;
+          const current = existingByName.get(s.topic);
+          const currentCount = current?.partitions.length ?? 0;
+          if (currentCount > 0 && currentCount < s.numPartitions) {
+            grow.push({ topic: s.topic, totalCount: s.numPartitions });
+          }
+        }
+        if (grow.length) await admin.createPartitions(grow);
+      }
+    } finally {
+      await admin.close();
+    }
+  }
+
+  /**
+   * Borrow a fresh admin from the driver and connect it. Throws when the
+   * driver does not implement admin (custom drivers without that capability).
+   */
+  private async openDriverAdmin(): Promise<KafkaDriverAdmin> {
+    if (!this.driver.admin) {
+      throw new Error(
+        "KafkaPublisher: configured driver does not implement admin(). " +
+          "Use the built-in kafkajs or confluent driver, or extend your custom driver.",
+      );
+    }
+    const admin = await this.driver.admin();
+    await admin.connect();
+    return admin;
+  }
+
+  /**
+   * Open an admin, list topics, throw if any required topic is missing.
+   * Always closes the admin (success or failure).
+   */
+  private async assertTopicsExist(required: readonly string[]): Promise<void> {
+    const admin = await this.openDriverAdmin();
+    try {
+      const all = new Set(await admin.listTopics());
+      const missing = required.filter((t) => !all.has(t));
+      if (missing.length) {
+        throw new Error(
+          `KafkaPublisher: validateTopicsOnConnect failed — topics missing on cluster: ${missing.join(", ")}`,
+        );
+      }
+    } finally {
+      await admin.close();
+    }
   }
 
   async disconnect(): Promise<void> {
@@ -93,9 +205,21 @@ export class KafkaPublisher implements Publisher {
     if (messages.length === 0) return [];
 
     const span = this.startBatchSpan(messages);
+    // If the tracer can inject trace context (W3C `traceparent`/`tracestate`
+    // is the common case), clone each message and let the tracer enrich its
+    // headers. We MUST NOT mutate the caller's PublishableMessage objects —
+    // the relay reuses the same record reference across retries and any
+    // mutation would corrupt later attempts.
+    const outgoing: PublishableMessage[] = this.tracer.inject
+      ? messages.map((m) => {
+          const headers = { ...m.headers };
+          this.tracer.inject!(span, headers);
+          return { ...m, headers };
+        })
+      : messages;
     let results: PublishResult[];
     try {
-      results = await this.driver.sendBatch(messages);
+      results = await this.driver.sendBatch(outgoing);
     } catch (err) {
       // Driver-level throw — every record is a failure attributed to the
       // batch-level error. Record on the span, fire hook, rethrow.

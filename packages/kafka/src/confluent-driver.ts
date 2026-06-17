@@ -7,6 +7,12 @@ import type {
   KafkaDriver,
   ProducerBehaviorConfig,
 } from "./driver.js";
+import type {
+  KafkaDriverAdmin,
+  PartitionGrowSpec,
+  TopicCreateSpec,
+  TopicMetadata,
+} from "./admin.js";
 
 // Structural typing of the confluent KafkaJS-compatible API surface so this
 // file compiles without the optional native dep installed.
@@ -23,6 +29,37 @@ interface CkTransaction {
 }
 interface CkKafka {
   producer(args?: unknown): CkProducer;
+  admin(): CkAdmin;
+}
+// Structural shape of the confluent kafkaJS-compat admin client. The
+// surface mirrors kafkajs's so we can reuse the wrapper pattern.
+interface CkAdmin {
+  connect(): Promise<void>;
+  disconnect(): Promise<void>;
+  listTopics(): Promise<string[]>;
+  fetchTopicMetadata(args: { topics: string[] }): Promise<{
+    topics: Array<{
+      name: string;
+      partitions: Array<{
+        partitionId: number;
+        leader: number;
+        replicas: number[];
+        isr: number[];
+      }>;
+    }>;
+  }>;
+  createTopics(args: {
+    topics: Array<{
+      topic: string;
+      numPartitions?: number;
+      replicationFactor?: number;
+      configEntries?: Array<{ name: string; value: string }>;
+    }>;
+    waitForLeaders?: boolean;
+  }): Promise<boolean>;
+  createPartitions(args: {
+    topicPartitions: Array<{ topic: string; count: number }>;
+  }): Promise<void>;
 }
 
 export interface ConfluentDriverOptions
@@ -81,6 +118,18 @@ export class ConfluentDriver implements KafkaDriver {
   async disconnect(): Promise<void> {
     await this.producer?.disconnect();
     this.producer = null;
+  }
+
+  /**
+   * Construct a librdkafka-backed admin client wrapped in the eventferry
+   * `KafkaDriverAdmin` shape. The publisher's `connect()` is called before
+   * the admin reaches the user.
+   */
+  async admin(): Promise<KafkaDriverAdmin> {
+    const mod = await importConfluent();
+    const { kafkaJS, librdkafka } = buildConfluentClientConfig(this.opts);
+    const kafka: CkKafka = new mod.KafkaJS.Kafka({ kafkaJS, ...librdkafka });
+    return new ConfluentAdmin(kafka.admin());
   }
 
   async sendBatch(messages: PublishableMessage[]): Promise<PublishResult[]> {
@@ -159,6 +208,84 @@ function groupByTopic(messages: PublishableMessage[]) {
     topic,
     messages: msgs,
   }));
+}
+
+/**
+ * Adapt the confluent (librdkafka) admin client to the
+ * {@link KafkaDriverAdmin} contract. Idempotent semantics mirror the
+ * kafkajs admin wrapper.
+ */
+class ConfluentAdmin implements KafkaDriverAdmin {
+  constructor(private readonly client: CkAdmin) {}
+
+  async connect(): Promise<void> {
+    await this.client.connect();
+  }
+
+  async close(): Promise<void> {
+    await this.client.disconnect();
+  }
+
+  async listTopics(): Promise<string[]> {
+    return await this.client.listTopics();
+  }
+
+  async describeTopics(topics: string[]): Promise<TopicMetadata[]> {
+    if (topics.length === 0) return [];
+    const all = new Set(await this.client.listTopics());
+    const existing = topics.filter((t) => all.has(t));
+    const missing = topics.filter((t) => !all.has(t));
+    const meta = existing.length
+      ? await this.client.fetchTopicMetadata({ topics: existing })
+      : { topics: [] };
+    const byName = new Map(meta.topics.map((t) => [t.name, t]));
+    return topics.map((topic) => {
+      if (missing.includes(topic)) return { topic, partitions: [] };
+      const found = byName.get(topic);
+      if (!found) return { topic, partitions: [] };
+      return {
+        topic,
+        partitions: found.partitions.map((p) => ({
+          partitionId: p.partitionId,
+          leader: p.leader,
+          replicas: p.replicas,
+          isr: p.isr,
+        })),
+      };
+    });
+  }
+
+  async createTopics(specs: TopicCreateSpec[]): Promise<void> {
+    if (specs.length === 0) return;
+    const topics = specs.map((s) => ({
+      topic: s.topic,
+      numPartitions: s.numPartitions,
+      replicationFactor: s.replicationFactor,
+      configEntries: s.configEntries
+        ? Object.entries(s.configEntries).map(([name, value]) => ({ name, value }))
+        : undefined,
+    }));
+    try {
+      await this.client.createTopics({ topics, waitForLeaders: true });
+    } catch (err) {
+      // librdkafka raises a `code` numeric `36` for TOPIC_ALREADY_EXISTS;
+      // the kafkaJS-compat layer mirrors the kafkajs error shape too.
+      const e = err as { code?: number; name?: string; message?: string };
+      if (e?.code === 36 || e?.name === "TOPIC_ALREADY_EXISTS") return;
+      if (/already exists/i.test(e?.message ?? "")) return;
+      throw err;
+    }
+  }
+
+  async createPartitions(specs: PartitionGrowSpec[]): Promise<void> {
+    if (specs.length === 0) return;
+    await this.client.createPartitions({
+      topicPartitions: specs.map((s) => ({
+        topic: s.topic,
+        count: s.totalCount,
+      })),
+    });
+  }
 }
 
 async function importConfluent(): Promise<{

@@ -1,4 +1,5 @@
 import type { PublishableMessage, PublishResult } from "@eventferry/core";
+import type { KafkaDriverAdmin } from "./admin.js";
 
 /**
  * Low-level driver contract. Each concrete driver (kafkajs, confluent)
@@ -21,6 +22,15 @@ export interface KafkaDriver {
    * uses this to decide whether `sendBatch` is atomic.
    */
   readonly transactional: boolean;
+
+  /**
+   * Construct a NEW admin client. The returned admin is not yet connected —
+   * the publisher calls `.connect()` before handing it to the user.
+   *
+   * Optional: drivers without an admin surface may omit this; the publisher
+   * throws a clear error when `publisher.admin()` is called on such a driver.
+   */
+  admin?(): Promise<KafkaDriverAdmin>;
 }
 
 /**
@@ -159,6 +169,14 @@ export interface ProducerBehaviorConfig {
   acks?: number;
   /** Compression codec. Driver maps to its native enum. */
   compression?: "none" | "gzip" | "snappy" | "lz4" | "zstd";
+  /**
+   * (confluent only) Compression level for the chosen codec. Defaults vary
+   * per codec — librdkafka picks the broker-friendly default when unset.
+   * Common ranges: gzip 1–9, lz4 0–12, zstd 1–22 (higher = smaller + slower).
+   *
+   * No-op on the kafkajs driver (kafkajs does not expose codec levels).
+   */
+  compressionLevel?: number;
 
   // ── Tuning knobs ────────────────────────────────────────────────────────
   //
@@ -219,6 +237,44 @@ export interface ProducerBehaviorConfig {
    * whether this callback throws.
    */
   onTransactionAbort?: (error: Error) => void;
+
+  // ── Power-user escape hatches ───────────────────────────────────────────
+  //
+  // The high-level options above cover ~95% of cases. The hooks below let
+  // you reach into the native client when you need a knob we don't expose.
+  // Native config takes PRECEDENCE over eventferry's translated keys —
+  // anything you put here wins. Use sparingly; surfaces are NOT typed.
+
+  /**
+   * (confluent only) Raw librdkafka producer-config keys merged on top of
+   * eventferry's translated config. Use for tuning surface area we don't
+   * expose typed (e.g. `queue.buffering.max.messages`, `socket.keepalive.enable`,
+   * `statistics.interval.ms`). Native keys win against the translated ones,
+   * so this can also be used to override defaults.
+   *
+   * Ignored by the kafkajs driver — log a one-time warning instead of
+   * silently dropping. Use `rawKafkaJsProducerConfig` for kafkajs-side tuning.
+   */
+  rawProducerConfig?: Record<string, unknown>;
+  /**
+   * (kafkajs only) Raw producer-config keys merged into kafkajs's
+   * `kafka.producer({...})` call. Native keys win against the translated
+   * ones. Use for kafkajs-internal knobs like `retry`, `metadataMaxAge`,
+   * `idempotent` overrides, etc.
+   *
+   * No-op on the confluent driver — use `rawProducerConfig` there.
+   */
+  rawKafkaJsProducerConfig?: Record<string, unknown>;
+  /**
+   * (kafkajs only) Custom partitioner factory passed straight to
+   * `kafka.producer({ createPartitioner })`. Overrides {@link partitioner}
+   * preset entirely. See kafkajs docs for the factory signature:
+   * `() => (args: { topic, partitionMetadata, message }) => number`.
+   *
+   * Ignored by the confluent driver — librdkafka's partitioner is a C
+   * extension point, not a JS callback.
+   */
+  customPartitioner?: () => (args: unknown) => number;
 }
 
 export type DriverKind = "kafkajs" | "confluent";

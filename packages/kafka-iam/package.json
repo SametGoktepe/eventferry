@@ -1,7 +1,7 @@
 {
-  "name": "@eventferry/kafka",
-  "version": "3.3.1",
-  "description": "Kafka/Redpanda publisher for @eventferry (kafkajs + confluent drivers)",
+  "name": "@eventferry/kafka-iam",
+  "version": "0.1.0",
+  "description": "AWS MSK IAM (SASL/OAUTHBEARER over SigV4) helper for @eventferry/kafka",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -11,11 +11,6 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "require": "./dist/index.cjs"
-    },
-    "./consume": {
-      "types": "./dist/consume.d.ts",
-      "import": "./dist/consume.js",
-      "require": "./dist/consume.cjs"
     }
   },
   "files": [
@@ -30,20 +25,14 @@
   },
   "keywords": [
     "outbox",
-    "outbox-pattern",
     "transactional-outbox",
     "kafka",
-    "redpanda",
-    "kafkajs",
-    "confluent-kafka",
-    "confluent",
-    "librdkafka",
-    "dlq",
-    "dead-letter-queue",
-    "idempotent-producer",
-    "exactly-once",
+    "msk",
+    "aws-msk",
+    "aws-iam",
+    "sasl-oauthbearer",
+    "sigv4",
     "event-driven",
-    "event-publishing",
     "nodejs",
     "typescript"
   ],
@@ -51,31 +40,26 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/SametGoktepe/eventferry.git",
-    "directory": "packages/kafka"
+    "directory": "packages/kafka-iam"
   },
-  "homepage": "https://github.com/SametGoktepe/eventferry/tree/main/packages/kafka#readme",
+  "homepage": "https://github.com/SametGoktepe/eventferry/tree/main/packages/kafka-iam#readme",
   "bugs": "https://github.com/SametGoktepe/eventferry/issues",
   "engines": {
     "node": ">=18"
   },
   "dependencies": {
-    "@eventferry/core": "workspace:*"
+    "@eventferry/kafka": "workspace:*"
   },
   "peerDependencies": {
-    "kafkajs": "^2.0.0",
-    "@confluentinc/kafka-javascript": "^1.0.0"
+    "aws-msk-iam-sasl-signer-js": "^1.0.0"
   },
   "peerDependenciesMeta": {
-    "kafkajs": {
-      "optional": true
-    },
-    "@confluentinc/kafka-javascript": {
+    "aws-msk-iam-sasl-signer-js": {
       "optional": true
     }
   },
   "devDependencies": {
-    "@eventferry/core": "workspace:*",
-    "kafkajs": "^2.2.4",
+    "@eventferry/kafka": "workspace:*",
     "tsup": "^8.3.5",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
