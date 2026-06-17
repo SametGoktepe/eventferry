@@ -1,6 +1,6 @@
 {
   "name": "@eventferry/postgres",
-  "version": "3.3.0",
+  "version": "3.3.1",
   "description": "PostgreSQL store for @eventferry (polling + lock-free claim)",
   "type": "module",
   "main": "./dist/index.cjs",
