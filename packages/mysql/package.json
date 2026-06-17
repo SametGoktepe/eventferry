@@ -52,8 +52,10 @@
   "engines": {
     "node": ">=18"
   },
+  "dependencies": {
+    "@eventferry/core": "workspace:*"
+  },
   "peerDependencies": {
-    "@eventferry/core": "workspace:*",
     "mysql2": "^3.0.0",
     "@vlasky/zongji": "^0.6.0"
   },
