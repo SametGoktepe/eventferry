@@ -1,5 +1,12 @@
 # @eventferry/schema-registry
 
+## 3.2.2
+
+### Patch Changes
+
+- Updated dependencies [cdc20cf]
+  - @eventferry/core@3.3.0
+
 ## 3.2.1
 
 ### Patch Changes
