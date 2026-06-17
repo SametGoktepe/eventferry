@@ -1,5 +1,12 @@
 # @eventferry/mysql
 
+## 4.0.0
+
+### Patch Changes
+
+- Updated dependencies [da39b08]
+  - @eventferry/core@4.0.0
+
 ## 3.0.0
 
 ### Patch Changes
