@@ -1,5 +1,6 @@
 import type { PublishableMessage, PublishResult } from "@eventferry/core";
 import { classifyConfluentError } from "./confluent-classifier.js";
+import { buildConfluentClientConfig } from "./confluent-config.js";
 import type {
   KafkaConnectionConfig,
   KafkaDriver,
@@ -58,13 +59,10 @@ export class ConfluentDriver implements KafkaDriver {
    */
   protected async createProducer(): Promise<CkProducer> {
     const mod = await importConfluent();
+    const { kafkaJS, librdkafka } = buildConfluentClientConfig(this.opts);
     const kafka: CkKafka = new mod.KafkaJS.Kafka({
-      kafkaJS: {
-        clientId: this.opts.clientId ?? "eventferry",
-        brokers: this.opts.brokers,
-        ssl: this.opts.ssl,
-        sasl: this.opts.sasl,
-      },
+      kafkaJS,
+      ...librdkafka,
     });
     return kafka.producer({
       kafkaJS: {

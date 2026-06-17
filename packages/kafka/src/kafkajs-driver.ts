@@ -60,7 +60,14 @@ export class KafkaJsDriver implements KafkaDriver {
     const kafka: KjsKafka = new mod.Kafka({
       clientId: this.opts.clientId ?? "eventferry",
       brokers: this.opts.brokers,
+      // kafkajs accepts `ssl: tls.ConnectionOptions` directly — Buffer + PEM
+      // string both supported. Our TlsConfig is a structural subset of that
+      // (`rejectUnauthorized` intentionally omitted; the cluster CA goes via
+      // `ca`). No translation needed.
       ssl: this.opts.ssl,
+      // SASL: PLAIN / SCRAM-SHA-256 / SCRAM-SHA-512 / OAUTHBEARER. kafkajs's
+      // shape matches ours; for OAUTHBEARER kafkajs reads only `value` from
+      // the provider's returned token (other fields are ignored).
       sasl: this.opts.sasl,
     });
     return kafka.producer({
