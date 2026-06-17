@@ -20,7 +20,8 @@
   },
   "files": [
     "dist",
-    "sql"
+    "sql",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "build": "tsup",
