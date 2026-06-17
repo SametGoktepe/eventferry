@@ -11,6 +11,11 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "require": "./dist/index.cjs"
+    },
+    "./consume": {
+      "types": "./dist/consume.d.ts",
+      "import": "./dist/consume.js",
+      "require": "./dist/consume.cjs"
     }
   },
   "files": [

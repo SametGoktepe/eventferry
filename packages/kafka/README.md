@@ -271,6 +271,24 @@ Per the spec, eventferry emits **one span per `publish()` call**, named `"{topic
 
 The user-supplied tracer SHOULD set `SpanKind.PRODUCER` on the span; the adapter above does this explicitly.
 
+#### Propagating trace context to consumers
+
+Add an optional `inject` method on the tracer to write the W3C `traceparent` / `tracestate` headers into each outgoing message. Pair this with `extractTraceContext` on the consumer side (see [Consumer helpers](#consumer-helpers--eventferrykafkaconsume)).
+
+```ts
+import { context as otelContext, propagation, trace } from "@opentelemetry/api";
+
+const tracer: KafkaTracer = {
+  startPublishSpan: /* …as above… */,
+  inject(_span, headers) {
+    // The publisher wraps the active span context for us before calling this.
+    propagation.inject(otelContext.active(), headers);
+  },
+};
+```
+
+The publisher clones each outbound message before injecting (the caller's `PublishableMessage` is never mutated, so the relay's retry path stays correct).
+
 ### Logger
 
 Pass a `Logger` (the same interface used by `@eventferry/core`) to route the publisher's own diagnostics — driver warnings, hook failures — through your logging stack:
@@ -338,6 +356,39 @@ What it does NOT do (by design):
 
 - Reconcile replication factor on existing topics — Kafka has no safe in-place alter (use partition reassignment for that).
 - Reconcile `configEntries` on existing topics — use `kafka-configs.sh` or the raw admin client (kafkajs's `alterConfigs`) if you need that.
+
+### Consumer helpers — `@eventferry/kafka/consume`
+
+eventferry is publisher-only, but the records it produces are consumed somewhere downstream. The `consume` subpath ships zero-dep helpers for the typical decode + trace-continuation glue, and pulls in no kafkajs/confluent code:
+
+```ts
+import { decode, extractTraceContext } from "@eventferry/kafka/consume";
+
+await consumer.run({
+  eachMessage: async ({ message }) => {
+    // Normalize key/headers/value; default decoder is JSON.
+    const { key, value, headers, offset } = decode<{ orderId: string }>(message);
+
+    // Continue the producer's W3C trace context (if the publisher's tracer
+    // injects it — see "OpenTelemetry tracing" above for the inject hook).
+    const trace = extractTraceContext(message.headers);
+    if (trace) {
+      // → start a CONSUMER span as a child of trace.traceId / trace.spanId
+    }
+
+    await handle(value!);
+  },
+});
+```
+
+`decode` options:
+
+- `decoder: "json"` (default) — `JSON.parse(value.toString("utf8"))`. Empty/null value → `null` (handles compaction tombstones).
+- `decoder: "utf8"` — raw text.
+- `decoder: "none"` — raw `Buffer`.
+- `decoder: (bytes) => …` — custom (Avro, Protobuf, MessagePack, …).
+
+`extractTraceContext` returns `null` if no `traceparent` header is present or it fails W3C validation (all-zero IDs, `version: ff`, malformed hex). It accepts both raw consumer headers (Buffer values) and already-decoded headers (string values).
 
 ### `validateTopicsOnConnect`
 

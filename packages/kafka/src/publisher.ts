@@ -205,9 +205,21 @@ export class KafkaPublisher implements Publisher {
     if (messages.length === 0) return [];
 
     const span = this.startBatchSpan(messages);
+    // If the tracer can inject trace context (W3C `traceparent`/`tracestate`
+    // is the common case), clone each message and let the tracer enrich its
+    // headers. We MUST NOT mutate the caller's PublishableMessage objects —
+    // the relay reuses the same record reference across retries and any
+    // mutation would corrupt later attempts.
+    const outgoing: PublishableMessage[] = this.tracer.inject
+      ? messages.map((m) => {
+          const headers = { ...m.headers };
+          this.tracer.inject!(span, headers);
+          return { ...m, headers };
+        })
+      : messages;
     let results: PublishResult[];
     try {
-      results = await this.driver.sendBatch(messages);
+      results = await this.driver.sendBatch(outgoing);
     } catch (err) {
       // Driver-level throw — every record is a failure attributed to the
       // batch-level error. Record on the span, fire hook, rethrow.
