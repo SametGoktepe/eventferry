@@ -1,6 +1,6 @@
 {
   "name": "@eventferry/all",
-  "version": "3.2.5",
+  "version": "3.2.6",
   "description": "Meta-package: installs and re-exports all of eventferry (core + postgres + mysql + kafka + schema-registry)",
   "type": "module",
   "main": "./dist/index.cjs",
