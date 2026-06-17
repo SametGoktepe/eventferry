@@ -323,6 +323,41 @@ const tracer: KafkaTracer = {
 
 The publisher clones each outbound message before injecting (the caller's `PublishableMessage` is never mutated, so the relay's retry path stays correct).
 
+## Health check
+
+Cheap reachability probe — useful as the body of a `/healthz` or `/readyz` endpoint:
+
+```ts
+import express from "express";
+const app = express();
+
+app.get("/healthz", async (_req, res) => {
+  const status = await publisher.healthCheck({ timeoutMs: 3_000 });
+  res.status(status.ok ? 200 : 503).json({
+    ok: status.ok,
+    latencyMs: status.latencyMs,
+    error: status.error?.message,
+  });
+});
+```
+
+`publisher.healthCheck()` opens a fresh admin, calls `listTopics`, and returns:
+
+```ts
+interface HealthStatus {
+  ok: boolean;          // broker answered within timeout
+  latencyMs: number;    // probe wall-clock
+  timestamp: number;    // epoch ms when the probe started
+  error?: Error;        // present when ok === false
+}
+```
+
+Default `timeoutMs: 5_000` — long enough to ride out a single broker leader election, short enough to fail a liveness probe meaningfully. Set `timeoutMs: 0` to disable the timer.
+
+**What this proves**: the broker is reachable AND the configured credentials still authenticate. **What this does NOT prove**: the producer's send path is fully operational — a fenced transactional producer would still answer healthy here. Treat the result as "broker reachable + auth still good", not "publisher fully operational".
+
+The borrowed admin is always closed (success or failure). Admin-side close failures don't change the outcome — health checks aren't the place to crash.
+
 ## Producer-fenced restart
 
 `PRODUCER_FENCED` and `INVALID_PRODUCER_EPOCH` errors classify as `errorKind: "fenced"` — a distinct kind from `fatal` because some fences are **transient** (broker restart, network partition recovery) rather than a permanent multi-instance collision.
