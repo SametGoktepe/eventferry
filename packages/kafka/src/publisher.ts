@@ -60,6 +60,32 @@ export interface KafkaPublisherOptions
    * fire. Driver must implement `admin()` (the built-ins do).
    */
   validateTopicsOnConnect?: string[];
+  /**
+   * Transparently recover from a producer-fence error. When set to `true`,
+   * a `publish()` call whose batch comes back with at least one
+   * `errorKind: "fenced"` result triggers ONE round of:
+   *
+   *   1. disconnect the driver
+   *   2. connect it again (re-running `initTransactions` for transactional producers)
+   *   3. re-send the same batch
+   *
+   * If the second send still produces a fenced result, the publisher gives
+   * up and surfaces the failures unchanged — at that point the fence is
+   * almost certainly caused by another instance taking the same
+   * `transactionalId`, and silently retrying again would mask the
+   * misconfiguration.
+   *
+   * Default `false` to preserve the previous "fenced → fatal" semantics.
+   * Turn it on when running a single producer instance against transient
+   * brokers (rolling restarts, network blips) where a fence is usually
+   * just a transient epoch mismatch.
+   *
+   * For MULTI-INSTANCE EOS, leave this OFF and use a callable
+   * `transactionalId` derived from per-instance context (pod name, k8s
+   * ordinal, AZ + replica index) so each instance has a stable, unique
+   * id — fences will then correctly stop the loser instance.
+   */
+  autoRecoverFromFence?: boolean;
 }
 
 /**
@@ -74,6 +100,11 @@ export class KafkaPublisher implements Publisher {
   private readonly hooks: KafkaPublisherHooks;
   private readonly tracer: KafkaTracer;
   private readonly validateTopicsOnConnect: readonly string[] | undefined;
+  private readonly autoRecoverFromFence: boolean;
+  // Serialize reconnects so concurrent publish() calls hitting a fence
+  // all observe the same single reconnect attempt — the second publish
+  // doesn't try to disconnect a producer the first is still re-initing.
+  private fenceRecovery: Promise<void> | null = null;
 
   constructor(opts: KafkaPublisherOptions) {
     this.logger = opts.logger;
@@ -82,6 +113,7 @@ export class KafkaPublisher implements Publisher {
     this.validateTopicsOnConnect = opts.validateTopicsOnConnect
       ? Object.freeze([...opts.validateTopicsOnConnect])
       : undefined;
+    this.autoRecoverFromFence = opts.autoRecoverFromFence ?? false;
     // Plumb the logger into driver construction so driver-side diagnostics
     // (e.g. kafkajs unsupported-tuning warnings) route through it too.
     // Plumb a safe-wrapped onTransactionAbort callback so the driver-level
@@ -231,6 +263,24 @@ export class KafkaPublisher implements Publisher {
       throw err;
     }
 
+    // Fence detection + transparent single-shot recovery. Runs BEFORE the
+    // per-record hooks so observers see a clean "all ok" path when the
+    // retry succeeds — they only see the fence error if the second attempt
+    // also fails. Fires the onProducerFenced hook regardless of whether
+    // auto-recovery is enabled (informational signal).
+    const firstFenced = results.find(
+      (r) => !r.ok && r.errorKind === "fenced",
+    );
+    if (firstFenced) {
+      const fenceErr = firstFenced.error ?? new Error("producer fenced");
+      await safeHook(this.logger, "onProducerFenced", () =>
+        this.hooks.onProducerFenced?.(fenceErr),
+      );
+      if (this.autoRecoverFromFence) {
+        results = await this.recoverAndRetry(outgoing, results);
+      }
+    }
+
     // Per-record hooks. Walk by index so the original message is available.
     const byId = new Map(messages.map((m) => [m.recordId, m]));
     let allOk = true;
@@ -280,6 +330,53 @@ export class KafkaPublisher implements Publisher {
   /** Whether the configured driver provides atomic (EOS) batch sends. */
   get transactional(): boolean {
     return this.driver.transactional;
+  }
+
+  /**
+   * Disconnect + re-connect the driver and re-send the batch ONCE. Used
+   * by the fence-recovery path. Concurrent fence recoveries dedupe on a
+   * shared in-flight promise (`fenceRecovery`) so we don't tear the
+   * producer down while another batch is mid-restart.
+   *
+   * If the second send STILL reports any fenced records, those failures
+   * are returned unchanged — another instance has almost certainly taken
+   * the same `transactionalId` and silently retrying again would mask
+   * the misconfiguration.
+   */
+  private async recoverAndRetry(
+    outgoing: PublishableMessage[],
+    firstResults: PublishResult[],
+  ): Promise<PublishResult[]> {
+    if (!this.fenceRecovery) {
+      this.fenceRecovery = (async () => {
+        try {
+          await this.driver.disconnect();
+          await this.driver.connect();
+        } finally {
+          // Clear the slot so a SUBSEQUENT fence can attempt recovery
+          // again — recoveries are per-incident, not per-process.
+          this.fenceRecovery = null;
+        }
+      })();
+    }
+    try {
+      await this.fenceRecovery;
+    } catch (err) {
+      // Reconnect itself failed — surface the original fence result so
+      // the relay can DLQ + alert. The reconnect error is informational.
+      const reconnectErr =
+        err instanceof Error ? err : new Error(String(err));
+      await safeHook(this.logger, "onError", () =>
+        this.hooks.onError?.(reconnectErr),
+      );
+      return firstResults;
+    }
+    try {
+      return await this.driver.sendBatch(outgoing);
+    } catch {
+      // Driver threw on the second attempt — surface original fence results.
+      return firstResults;
+    }
   }
 
   /**

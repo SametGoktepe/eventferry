@@ -30,6 +30,10 @@ export function classifyKafkajsError(err: unknown): PublishErrorKind {
   // string label.
   const type = typeof e.type === "string" ? e.type : undefined;
   if (type) {
+    // Fenced check comes BEFORE the fatal lookup: PRODUCER_FENCED /
+    // INVALID_PRODUCER_EPOCH split out from "fatal" lets the publisher
+    // attempt a single transparent re-init before escalating.
+    if (FENCED_TYPES.has(type)) return "fenced";
     if (RETRIABLE_TYPES.has(type)) return "retriable";
     if (POISON_TYPES.has(type)) return "poison";
     if (FATAL_TYPES.has(type)) return "fatal";
@@ -68,9 +72,12 @@ const POISON_TYPES = new Set<string>([
   "INVALID_PARTITIONS",
 ]);
 
-const FATAL_TYPES = new Set<string>([
+const FENCED_TYPES = new Set<string>([
   "INVALID_PRODUCER_EPOCH",
   "PRODUCER_FENCED",
+]);
+
+const FATAL_TYPES = new Set<string>([
   "TOPIC_AUTHORIZATION_FAILED",
   "CLUSTER_AUTHORIZATION_FAILED",
   "TRANSACTIONAL_ID_AUTHORIZATION_FAILED",
@@ -92,7 +99,7 @@ const CODE_TO_KIND: ReadonlyMap<number, PublishErrorKind> = new Map([
   [19, "retriable"], // NOT_ENOUGH_REPLICAS
   [29, "fatal"], // TOPIC_AUTHORIZATION_FAILED
   [31, "fatal"], // CLUSTER_AUTHORIZATION_FAILED
-  [47, "fatal"], // INVALID_PRODUCER_EPOCH
+  [47, "fenced"], // INVALID_PRODUCER_EPOCH — retryable once via publisher reconnect
   [58, "fatal"], // SASL_AUTHENTICATION_FAILED
   [74, "retriable"], // FENCED_LEADER_EPOCH
   [76, "poison"], // UNSUPPORTED_COMPRESSION_TYPE

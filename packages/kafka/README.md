@@ -289,6 +289,50 @@ const tracer: KafkaTracer = {
 
 The publisher clones each outbound message before injecting (the caller's `PublishableMessage` is never mutated, so the relay's retry path stays correct).
 
+## Producer-fenced restart
+
+`PRODUCER_FENCED` and `INVALID_PRODUCER_EPOCH` errors classify as `errorKind: "fenced"` — a distinct kind from `fatal` because some fences are **transient** (broker restart, network partition recovery) rather than a permanent multi-instance collision.
+
+### `autoRecoverFromFence: true`
+
+Opt in to a single transparent reconnect-and-retry when a publish batch reports a fence:
+
+```ts
+new KafkaPublisher({
+  brokers,
+  transactional: true,
+  transactionalId: "orders-publisher",
+  autoRecoverFromFence: true,
+});
+```
+
+What happens on a fenced batch:
+
+1. The `onProducerFenced(error)` hook fires (regardless of the recovery flag — informational).
+2. The driver is disconnected and reconnected (re-running `initTransactions` for transactional producers).
+3. The same batch is resent **once**.
+4. If the second send still reports any fenced record, the publisher gives up and surfaces those failures unchanged — silently retrying again would mask a misconfiguration.
+
+Concurrent fenced publishes share a single in-flight reconnect — the producer is not torn down twice while a recovery is in progress.
+
+**Default is `false`** to preserve the previous "fenced → propagate to relay" behavior. The relay will retry fenced records under the configured backoff and DLQ them when `attempts > retry.maxAttempts`.
+
+### `transactional.id` strategy for multi-instance EOS
+
+When running multiple producer instances against the same logical workload, each instance MUST have a stable, unique `transactionalId`. Use the callable form to derive it from runtime context:
+
+```ts
+new KafkaPublisher({
+  brokers,
+  transactional: true,
+  transactionalId: () => `${process.env.POD_NAME}-${process.env.HOSTNAME}`,
+  // Leave autoRecoverFromFence OFF — a fence means a real collision
+  // worth surfacing.
+});
+```
+
+Cross-instance fence is **not** a transient blip — it's the broker telling one of you that the other is now the canonical producer. Auto-recovery would create a thrashing leadership flip. Keep the option off in multi-instance setups and let the loser instance fail loudly.
+
 ## librdkafka stats hook
 
 The confluent driver exposes librdkafka's periodic statistics stream as a typed callback. Useful for piping queue depth, broker latency, broker timeout counts, and per-topic/per-partition counters into your metrics stack.

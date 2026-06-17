@@ -123,13 +123,22 @@ export interface PublishableMessage {
  * - `quota` — the broker is throttling us (`THROTTLING_QUOTA_EXCEEDED`).
  *   Back off with longer delays. v2.1 treats as `retriable`; smarter
  *   handling (longer backoff) is planned.
+ * - `fenced` — the broker fenced this producer epoch
+ *   (`PRODUCER_FENCED` / `INVALID_PRODUCER_EPOCH`). Usually caused by
+ *   another instance taking the same `transactionalId`, but ALSO fired
+ *   on transient broker restart / network partition recovery. Distinct
+ *   from `fatal` because the `KafkaPublisher` can transparently
+ *   `disconnect + connect + initTransactions` once before falling back
+ *   to fatal (`autoRecoverFromFence: true` on the publisher, default
+ *   `false` to keep multi-instance behavior surprise-free).
  */
 export type PublishErrorKind =
   | "retriable"
   | "fatal"
   | "poison"
   | "backpressure"
-  | "quota";
+  | "quota"
+  | "fenced";
 
 /**
  * Result of attempting to publish a single message.

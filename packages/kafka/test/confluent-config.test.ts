@@ -220,7 +220,7 @@ describe("buildConfluentClientConfig — rawProducerConfig escape hatch", () => 
   });
 });
 
-describe("buildConfluentClientConfig — librdkafka stats hook (Phase C1)", () => {
+describe("buildConfluentClientConfig — librdkafka stats hook", () => {
   it("sets stats_cb + default statistics.interval.ms=30000 when onStats is provided", () => {
     const { librdkafka } = buildConfluentClientConfig({
       brokers: ["b:9092"],

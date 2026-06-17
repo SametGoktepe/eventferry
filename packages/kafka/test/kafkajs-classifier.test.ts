@@ -37,8 +37,8 @@ describe("classifyKafkajsError — protocol type strings", () => {
     { type: "MESSAGE_TOO_LARGE", want: "poison" },
     { type: "INVALID_RECORD", want: "poison" },
     { type: "UNSUPPORTED_COMPRESSION_TYPE", want: "poison" },
-    { type: "INVALID_PRODUCER_EPOCH", want: "fatal" },
-    { type: "PRODUCER_FENCED", want: "fatal" },
+    { type: "INVALID_PRODUCER_EPOCH", want: "fenced" },
+    { type: "PRODUCER_FENCED", want: "fenced" },
     { type: "TOPIC_AUTHORIZATION_FAILED", want: "fatal" },
     { type: "CLUSTER_AUTHORIZATION_FAILED", want: "fatal" },
     { type: "SASL_AUTHENTICATION_FAILED", want: "fatal" },
@@ -58,7 +58,7 @@ describe("classifyKafkajsError — numeric code fallback", () => {
     { code: 7, want: "retriable" }, // REQUEST_TIMED_OUT
     { code: 10, want: "poison" }, // MESSAGE_TOO_LARGE
     { code: 29, want: "fatal" }, // TOPIC_AUTHORIZATION_FAILED
-    { code: 47, want: "fatal" }, // INVALID_PRODUCER_EPOCH
+    { code: 47, want: "fenced" }, // INVALID_PRODUCER_EPOCH
     { code: 58, want: "fatal" }, // SASL_AUTHENTICATION_FAILED
     { code: 87, want: "poison" }, // INVALID_RECORD
   ];
@@ -66,6 +66,33 @@ describe("classifyKafkajsError — numeric code fallback", () => {
     expect(classifyKafkajsError({ name: "KafkaJSProtocolError", code })).toBe(
       want,
     );
+  });
+});
+
+describe("classifyKafkajsError — fenced", () => {
+  it("PRODUCER_FENCED is fenced, not fatal", () => {
+    expect(
+      classifyKafkajsError({ type: "PRODUCER_FENCED", code: 152 }),
+    ).toBe("fenced");
+  });
+
+  it("INVALID_PRODUCER_EPOCH is fenced (by type)", () => {
+    expect(
+      classifyKafkajsError({ type: "INVALID_PRODUCER_EPOCH", code: 47 }),
+    ).toBe("fenced");
+  });
+
+  it("INVALID_PRODUCER_EPOCH is fenced (by numeric code fallback)", () => {
+    expect(classifyKafkajsError({ code: 47 })).toBe("fenced");
+  });
+
+  it("other fatal types stay fatal (no regression)", () => {
+    expect(
+      classifyKafkajsError({ type: "SASL_AUTHENTICATION_FAILED" }),
+    ).toBe("fatal");
+    expect(
+      classifyKafkajsError({ type: "TOPIC_AUTHORIZATION_FAILED" }),
+    ).toBe("fatal");
   });
 });
 
