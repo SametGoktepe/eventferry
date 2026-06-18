@@ -1,6 +1,6 @@
-# @eventferry/mssql
+# @eventferry/mssql-cdc-relay
 
-## 1.2.0
+## 2.0.0
 
 ### Minor Changes
 
@@ -14,8 +14,7 @@
 
   The Phase A design (3 lenses: correctness, concurrency, edge-cases) caught **45 bugs across 17+12+16** issues that were folded into the final implementation. The integration suite still uses the original 17 MSSQL tests from PR #41 — broker waker + CDC integration testing requires special container configuration (Service Broker enabled, SQL Server Agent running) and is tracked as a follow-up.
 
-## 1.1.0
+### Patch Changes
 
-### Minor Changes
-
-- 4c6b0d0: New `@eventferry/mssql` package: a Microsoft SQL Server outbox store for SQL Server 2016 SP1+ (Azure SQL Database, Azure SQL Managed Instance, and on-prem), bringing the same transactional outbox semantics the Postgres and MySQL stores ship with to the SQL Server family. The claim path is the canonical `READCOMMITTEDLOCK + READPAST + UPDLOCK + ROWLOCK` hint stack — concurrent workers skip rows already locked by a peer rather than blocking, and strict head-of-aggregate ordering is preserved so a per-`aggregate_id` stream never reorders under contention; the server-side reaper uses `DATEADD`/`SYSUTCDATETIME` so claim-expiry math runs on the database clock rather than the caller's. `createMigrationSql` accepts a schema qualifier (default `dbo`) and a `useNativeJson` opt-in that switches the payload column to the native `json` type on SQL Server 2025+ while keeping `nvarchar(max)` as the safe default for older targets. `BIGINT` ids are returned as strings to match the tedious driver's convention and avoid the JS-number precision cliff at 2^53. One bug worth calling out from the integration suite: `markFailed(null, 'failed')` would `TypeError` on the lease-clear path and a retry loop would instantly re-claim the same row — fixed before the first tag. v1 ships polling only; a CDC streaming relay is deferred to a separate package so this one stays a drop-in peer of the existing SQL stores. Covered by 38 unit tests plus the integration suite running against a real SQL Server 2022 container via testcontainers.
+- Updated dependencies [cca1747]
+  - @eventferry/mssql@1.2.0
