@@ -3,7 +3,9 @@
 [![npm](https://img.shields.io/npm/v/@eventferry/postgres.svg)](https://www.npmjs.com/package/@eventferry/postgres)
 
 The **PostgreSQL store** for [eventferry](https://github.com/SametGoktepe/eventferry) —
-a transactional outbox toolkit for PostgreSQL + Kafka/Redpanda.
+a transactional outbox toolkit for PostgreSQL / MySQL / MariaDB / MSSQL + Kafka/Redpanda.
+For other databases see [`@eventferry/mysql`](https://www.npmjs.com/package/@eventferry/mysql)
+or [`@eventferry/mssql`](https://www.npmjs.com/package/@eventferry/mssql).
 
 Provides:
 
