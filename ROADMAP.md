@@ -50,7 +50,7 @@ flowchart TB
         direction LR
         PG["postgres ✅"]
         MY["mysql ✅"]
-        MS["mssql 🟢"]
+        MS["mssql ✅"]
         MG["mongodb 🟢"]
         CR["cockroach 🟡"]
         SQ["sqlite 🟡"]
@@ -138,8 +138,8 @@ timeline
     section ✅ Shipped
         v1.0 : PostgreSQL : WAL streaming relay : LISTEN/NOTIFY waker
         v2.0 : MySQL & MariaDB : binlog streaming relay
+        v3.0 : SQL Server
     section 🟢 Phase 1 — high demand
-        Relational : SQL Server
         Document : MongoDB
     section 🟡 Phase 2 — broaden coverage
         Postgres-compatible : CockroachDB
@@ -178,7 +178,7 @@ quadrantChart
 |---|---|:--:|:--:|:--:|:--:|---|
 | **PostgreSQL** | `@eventferry/postgres` ✅ shipped | ✅ | `FOR UPDATE SKIP LOCKED` | `LISTEN/NOTIFY` | logical replication (WAL / pgoutput) | `pg` |
 | **MySQL / MariaDB** | `@eventferry/mysql` ✅ shipped | ✅ (InnoDB) | ✅ MySQL 8.0.1+ / MariaDB 10.6+ | ❌ → polling | binlog (planned) | `mysql2` |
-| **SQL Server** | `@eventferry/mssql` | ✅ | `READPAST + UPDLOCK + ROWLOCK` | Query Notifications / Service Broker | native CDC / Change Tracking | `mssql` |
+| **SQL Server** | `@eventferry/mssql` ✅ shipped | ✅ | `READCOMMITTEDLOCK + READPAST + UPDLOCK + ROWLOCK` | ❌ → polling (v2 SSB) | CDC (separate v2 pkg) | `mssql` |
 | **MongoDB** | `@eventferry/mongodb` | ✅ (replica set 4.0+) | atomic `findOneAndUpdate` + claim token | **Change Streams** | **Change Streams** (oplog) | `mongodb` |
 | **CockroachDB** | `@eventferry/cockroach` | ✅ | `FOR UPDATE` (SKIP LOCKED 22.2+) | ❌ → polling | `CHANGEFEED` | `pg` |
 | **SQLite / libSQL** | `@eventferry/sqlite` | ✅ | single-writer (no skip-locked) ⚠️ | ❌ | WAL tail ⚠️ | `better-sqlite3` / `@libsql/client` |
@@ -199,11 +199,14 @@ with a clean answer for all three pillars.
 - [x] Documented fallback for older engines: `UPDATE ... ORDER BY id LIMIT n` + claim-token pattern with a one-time `claim_token` column. Covered in the package README's "Running on an older engine" section with the full claim path + caveats (throughput vs engine-floor trade-off).
 - [x] Passes the shared conformance kit on MySQL 8 **and** MariaDB 10.11 — integration suite parametrizes the `mysql-store` tests with `describe.each` against both engines. Caught a real MariaDB JSON-as-LONGTEXT driver-parity bug during the rollout (`row.ts` now defensively parses string payloads).
 
-### SQL Server — `@eventferry/mssql`
-- [ ] `claimBatch` via `UPDATE TOP (n) ... WITH (READPAST, UPDLOCK, ROWLOCK) ... OUTPUT inserted.*` (atomic claim-and-read)
-- [ ] `Waker` via Query Notifications / Service Broker (`SqlDependency`)
-- [ ] *(optional)* streaming relay over native CDC / Change Tracking
-- [ ] Passes the conformance kit
+### SQL Server — `@eventferry/mssql` ✅ shipped
+- [x] `claimBatch` via the canonical CTE + `UPDATE ... OUTPUT inserted.* INTO @claimed` pattern with `WITH (READCOMMITTEDLOCK, READPAST, UPDLOCK, ROWLOCK)` table hints. RCSI-safe (`READCOMMITTEDLOCK` forces locking semantics even when `READ_COMMITTED_SNAPSHOT` is ON on the database). Server-side reaper window via `DATEADD(MILLISECOND, -@claimTimeoutMs, SYSUTCDATETIME())`. Strict head-of-aggregate ordering enforced by `NOT EXISTS` on `(aggregate_id, id)`.
+- [x] `createMigrationSql(table, { schema, useNativeJson })` — idempotent `IF OBJECT_ID(...)` guard, schema-qualified, three indexes (head-of-aggregate, filtered claim-ready, filtered done-retention). `useNativeJson` opt-in for SQL Server 2025+ / Azure SQL DB; default `NVARCHAR(MAX) CHECK (ISJSON(value) = 1)` for SQL Server 2016 SP1+ coverage.
+- [x] Polling-only relay (the standard `@eventferry/core` `Relay` works against `MssqlStore` unchanged). Sub-second latency with the default `pollIntervalMs: 250`.
+- [x] BIGINT id returned as JS string (tedious convention to avoid `Number.MAX_SAFE_INTEGER` precision loss). `payload` + `headers` always JSON.parse'd on read (`mssql` driver does not auto-parse, mirroring our MariaDB parity fix).
+- [x] Passes the conformance kit on real SQL Server 2022 via Testcontainers — strict head-of-aggregate ordering, concurrent-claim no-duplicates, reaper window, requeue without attempts++, BIGINT-as-string, unicode payload round-trip, `markFailed(null, 'failed')` TypeError.
+- [ ] `Waker` via Query Notifications / Service Broker — deferred to v2. Service Broker via `mssql`/`tedious` ties up a pool connection indefinitely (`WAITFOR (RECEIVE ...)`), and maintained Node libraries for SSB are abandoned. Polling-only in v1; documented v2 path.
+- [ ] *(optional)* streaming relay over native CDC — deferred to a separate `@eventferry/mssql-cdc-relay` package. CDC requires SQL Server Agent (NOT available on Azure SQL Database — only Managed Instance and on-prem Windows).
 
 ### MongoDB — `@eventferry/mongodb`
 - [ ] Transactional `enqueue` using a session (requires a **replica set**; sharded 4.2+)

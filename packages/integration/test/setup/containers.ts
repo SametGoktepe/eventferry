@@ -1,4 +1,8 @@
 import {
+  MSSQLServerContainer,
+  type StartedMSSQLServerContainer,
+} from "@testcontainers/mssqlserver";
+import {
   MySqlContainer,
   type StartedMySqlContainer,
 } from "@testcontainers/mysql";
@@ -19,6 +23,7 @@ import {
 let pg: StartedPostgreSqlContainer | undefined;
 let mysql: StartedMySqlContainer | undefined;
 let mariadb: StartedTestContainer | undefined;
+let mssql: StartedMSSQLServerContainer | undefined;
 let redpanda: StartedRedpandaContainer | undefined;
 
 export async function setup(): Promise<void> {
@@ -94,6 +99,17 @@ export async function setup(): Promise<void> {
     .withStartupTimeout(180_000)
     .start();
 
+  // SQL Server 2022 — same `MssqlStore` code path. The 2022-latest image
+  // requires accepting the EULA and a strong sa password that meets the
+  // mssql complexity policy (8+ chars, upper, lower, digit, symbol);
+  // weaker passwords cause the engine to refuse to start. Cold boot of
+  // mssql can take 60-120s on a fresh runner.
+  mssql = await new MSSQLServerContainer("mcr.microsoft.com/mssql/server:2022-latest")
+    .acceptLicense()
+    .withPassword("EventFerry!Pass1")
+    .withStartupTimeout(180_000)
+    .start();
+
   redpanda = await new RedpandaContainer(
     "redpandadata/redpanda:latest",
   ).start();
@@ -109,12 +125,18 @@ export async function setup(): Promise<void> {
   process.env.MARIADB_USER = "eventferry";
   process.env.MARIADB_PASSWORD = "test";
   process.env.MARIADB_DATABASE = "eventferry";
+  process.env.MSSQL_HOST = mssql.getHost();
+  process.env.MSSQL_PORT = String(mssql.getMappedPort(1433));
+  process.env.MSSQL_USER = "sa";
+  process.env.MSSQL_PASSWORD = "EventFerry!Pass1";
+  process.env.MSSQL_DATABASE = "master";
   process.env.KAFKA_BROKERS = redpanda.getBootstrapServers();
   process.env.SCHEMA_REGISTRY_URL = redpanda.getSchemaRegistryAddress();
 }
 
 export async function teardown(): Promise<void> {
   await redpanda?.stop();
+  await mssql?.stop();
   await mariadb?.stop();
   await mysql?.stop();
   await pg?.stop();
