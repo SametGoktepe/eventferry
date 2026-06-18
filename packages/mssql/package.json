@@ -1,6 +1,6 @@
 {
   "name": "@eventferry/mssql",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "SQL Server (Azure SQL DB / on-prem) outbox store adapter for @eventferry",
   "type": "module",
   "main": "./dist/index.cjs",

@@ -1,6 +1,6 @@
 {
   "name": "@eventferry/mssql-cdc-relay",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "SQL Server CDC-driven Waker for @eventferry/mssql (sub-second latency via Change Data Capture; requires SQL Server Agent — not available on Azure SQL Database)",
   "type": "module",
   "main": "./dist/index.cjs",
