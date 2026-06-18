@@ -39,6 +39,15 @@ importers:
       '@eventferry/kafka':
         specifier: workspace:*
         version: link:../kafka
+      '@eventferry/kafka-iam':
+        specifier: workspace:*
+        version: link:../kafka-iam
+      '@eventferry/mssql':
+        specifier: workspace:*
+        version: link:../mssql
+      '@eventferry/mssql-cdc-relay':
+        specifier: workspace:*
+        version: link:../mssql-cdc-relay
       '@eventferry/mysql':
         specifier: workspace:*
         version: link:../mysql
@@ -190,6 +199,33 @@ importers:
       '@types/mssql':
         specifier: ^12.3.0
         version: 12.3.0
+      '@types/node':
+        specifier: ^20.0.0
+        version: 20.19.43
+      mssql:
+        specifier: ^11.0.1
+        version: 11.0.1
+      tsup:
+        specifier: ^8.3.5
+        version: 8.5.1(postcss@8.5.15)(typescript@5.9.3)(yaml@2.9.0)
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.6
+        version: 3.2.6(@types/node@20.19.43)(yaml@2.9.0)
+
+  packages/mssql-cdc-relay:
+    devDependencies:
+      '@eventferry/core':
+        specifier: workspace:*
+        version: link:../core
+      '@eventferry/mssql':
+        specifier: workspace:*
+        version: link:../mssql
+      '@types/mssql':
+        specifier: ^9.1.5
+        version: 9.1.11
       '@types/node':
         specifier: ^20.0.0
         version: 20.19.43

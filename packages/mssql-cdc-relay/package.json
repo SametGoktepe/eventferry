@@ -1,0 +1,82 @@
+{
+  "name": "@eventferry/mssql-cdc-relay",
+  "version": "1.0.0",
+  "description": "SQL Server CDC-driven Waker for @eventferry/mssql (sub-second latency via Change Data Capture; requires SQL Server Agent — not available on Azure SQL Database)",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./setup": {
+      "types": "./dist/setup.d.ts",
+      "import": "./dist/setup.js",
+      "require": "./dist/setup.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "CHANGELOG.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "outbox",
+    "outbox-pattern",
+    "transactional-outbox",
+    "mssql",
+    "sql-server",
+    "sqlserver",
+    "cdc",
+    "change-data-capture",
+    "waker",
+    "low-latency",
+    "event-driven",
+    "event-publishing",
+    "microservices",
+    "nodejs",
+    "typescript"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SametGoktepe/eventferry.git",
+    "directory": "packages/mssql-cdc-relay"
+  },
+  "homepage": "https://github.com/SametGoktepe/eventferry/tree/main/packages/mssql-cdc-relay#readme",
+  "bugs": "https://github.com/SametGoktepe/eventferry/issues",
+  "engines": {
+    "node": ">=18"
+  },
+  "peerDependencies": {
+    "@eventferry/core": "workspace:*",
+    "@eventferry/mssql": "workspace:*",
+    "mssql": ">=10 <13"
+  },
+  "peerDependenciesMeta": {
+    "mssql": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@eventferry/core": "workspace:*",
+    "@eventferry/mssql": "workspace:*",
+    "@types/mssql": "^9.1.5",
+    "@types/node": "^20.0.0",
+    "mssql": "^11.0.1",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2",
+    "vitest": "^3.2.6"
+  }
+}

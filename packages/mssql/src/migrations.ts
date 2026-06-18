@@ -184,3 +184,274 @@ IF NOT EXISTS (
         WHERE status = 2;
 `.trim();
 }
+
+/**
+ * Options for `createServiceBrokerSetupSql`.
+ *
+ * Service Broker URN-style names (`serviceName`, `initiatorServiceName`,
+ * `contractName`, `messageTypeName`) legitimately contain forward slashes
+ * (`//eventferry/outbox/...`), so they bypass `assertIdent`. They are
+ * embedded verbatim as `N'...'` literals inside `QUOTENAME(...)` system-catalog
+ * lookups and `[bracketed]` create-statement names. The other identifiers
+ * (`table`, `schema`, `queueName`, `initiatorQueueName`, `triggerName`,
+ * `cleanupProcName`) are SQL Server T-SQL identifiers and MUST pass
+ * `assertIdent` before composition.
+ */
+export interface CreateServiceBrokerSetupSqlOptions {
+  /** Outbox table the AFTER INSERT trigger fires on. Default `"outbox"`. */
+  table?: string;
+  /** Owning schema for the outbox table + Service Broker queues. Default `"dbo"`. */
+  schema?: string;
+  /** Target queue name (waker RECEIVEs from this). Default `"OutboxWakerQueue"`. */
+  queueName?: string;
+  /**
+   * Initiator queue name. Receives EndDialog / Error system messages from the
+   * trigger's BEGIN DIALOG side; drained by the cleanup activation proc to
+   * prevent `sys.conversation_endpoints` from accumulating. Default
+   * `"OutboxWakerInitiatorQueue"`.
+   */
+  initiatorQueueName?: string;
+  /** Target service URN. Default `"//eventferry/outbox/WakerTargetService"`. */
+  serviceName?: string;
+  /** Initiator service URN. Default `"//eventferry/outbox/WakerInitiatorService"`. */
+  initiatorServiceName?: string;
+  /** Contract URN. Default `"//eventferry/outbox/WakerContract"`. */
+  contractName?: string;
+  /** Wakeup message type URN. Default `"//eventferry/outbox/Wakeup"`. */
+  messageTypeName?: string;
+  /** AFTER INSERT trigger name. Default `"tr_<table>_outbox_waker"`. */
+  triggerName?: string;
+  /**
+   * Procedure name for the initiator-side cleanup activation proc that drains
+   * EndDialog/Error to prevent `conversation_endpoints` leak. Default
+   * `"OutboxWaker_InitiatorCleanup"`.
+   */
+  cleanupProcName?: string;
+}
+
+/**
+ * Generate an idempotent T-SQL block that provisions every Service Broker
+ * object the `MssqlServiceBrokerWaker` listens on:
+ *
+ *   1. Azure SQL Database refusal (`SERVERPROPERTY('EngineEdition') = 5`) —
+ *      Service Broker is not supported there; we `RAISERROR` + `RETURN`
+ *      rather than silently producing an unusable setup.
+ *   2. `ALTER DATABASE ... SET ENABLE_BROKER` guarded by (a) the MI skip —
+ *      EngineEdition `8` already has broker on and `ALTER DATABASE ... SET
+ *      ENABLE_BROKER` is disallowed on Managed Instance — and (b) the
+ *      `is_broker_enabled = 1` short-circuit so re-runs are no-ops.
+ *   3. `CREATE MESSAGE TYPE` (wakeup payload type) — `IF NOT EXISTS`.
+ *   4. `CREATE CONTRACT` binding the message type as `SENT BY INITIATOR` —
+ *      `IF NOT EXISTS`.
+ *   5. Target queue (`POISON_MESSAGE_HANDLING OFF`, `RETENTION OFF`) —
+ *      `IF NOT EXISTS`. Poison-message handling is OFF because the waker's
+ *      RECEIVE always commits without re-raising, so the 5-rollback
+ *      auto-disable would only be a footgun.
+ *   6. Initiator queue — `IF NOT EXISTS`. Sized identically; the cleanup
+ *      activation proc handles its drain.
+ *   7. Target + initiator services — `IF NOT EXISTS`, both bound to the
+ *      contract.
+ *   8. `CREATE OR ALTER PROCEDURE` for the initiator-cleanup activation proc.
+ *      Per the design's *Correctness lens*: ending the dialog on the
+ *      INITIATOR side immediately (as the trigger does) is safe ONLY because
+ *      this activation proc continually drains the resulting EndDialog +
+ *      Error messages — otherwise `sys.conversation_endpoints` accumulates
+ *      until queue starvation. `EXECUTE AS OWNER` + `MAX_QUEUE_READERS = 1`
+ *      to guarantee single-reader semantics and avoid contention on the
+ *      initiator queue.
+ *   9. `ALTER QUEUE ... WITH ACTIVATION` to wire the cleanup proc onto the
+ *      initiator queue.
+ *  10. `CREATE OR ALTER TRIGGER` on `<schema>.<table>` AFTER INSERT.
+ *      *Correctness lens*: the trigger uses an `IF EXISTS (SELECT 1 FROM
+ *      inserted)` guard + one `BEGIN DIALOG ... SEND` per statement (NOT
+ *      per row) — bulk inserts of N rows produce ONE wake message, not N,
+ *      keeping the queue depth proportional to write traffic, not row count.
+ *      `END CONVERSATION @handle` runs on the initiator side immediately
+ *      after `SEND` (fire-and-forget wakeup). The design notes this is
+ *      acceptable specifically because the initiator-cleanup activation
+ *      proc (step 8) drains the resulting endpoint cleanup messages — see
+ *      the file-level correctness review.
+ *
+ * Identifier validation:
+ *   - `table`, `schema`, `queueName`, `initiatorQueueName`, `triggerName`,
+ *     `cleanupProcName` are validated via `assertIdent` BEFORE composition
+ *     (defence in depth — never trust the caller).
+ *   - `serviceName`, `initiatorServiceName`, `contractName`,
+ *     `messageTypeName` are Service Broker URNs that legitimately contain
+ *     `/`, so they bypass `assertIdent`. They are embedded as `N'...'`
+ *     literals inside system-catalog `name = N'...'` lookups and as
+ *     `[bracketed]` names in `CREATE SERVICE` / `CREATE CONTRACT` /
+ *     `CREATE MESSAGE TYPE` statements. Per the design: URNs are treated
+ *     as opaque strings — no `'`, `;`, `[`, `]` characters should appear
+ *     in them, and operators MUST treat them as configuration, not user
+ *     input.
+ *
+ * The returned string is multi-statement and MUST be executed via
+ * `mssql.Request.batch()` (NOT `Request.query()`).
+ */
+export function createServiceBrokerSetupSql(
+  opts: CreateServiceBrokerSetupSqlOptions = {},
+): string {
+  const tableRaw = opts.table ?? "outbox";
+  const schemaRaw = opts.schema ?? "dbo";
+  const queueRaw = opts.queueName ?? "OutboxWakerQueue";
+  const initiatorQueueRaw = opts.initiatorQueueName ?? "OutboxWakerInitiatorQueue";
+  const triggerRaw = opts.triggerName ?? `tr_${tableRaw}_outbox_waker`;
+  const cleanupProcRaw = opts.cleanupProcName ?? "OutboxWaker_InitiatorCleanup";
+
+  // Defence in depth: every public migration entrypoint validates its own
+  // T-SQL identifiers BEFORE composing SQL — never rely on a downstream guard.
+  const t = assertIdent(tableRaw, "table");
+  const s = assertIdent(schemaRaw, "schema");
+  const q = assertIdent(queueRaw, "queueName");
+  const iq = assertIdent(initiatorQueueRaw, "initiatorQueueName");
+  const trg = assertIdent(triggerRaw, "triggerName");
+  const cleanupProc = assertIdent(cleanupProcRaw, "cleanupProcName");
+
+  // URN-style names — legitimately contain '/'. Embedded as N'...' literals
+  // for system-catalog lookups and as [bracketed] names in CREATE statements.
+  // Treat these as opaque configuration; no quoting characters are expected.
+  const svc = opts.serviceName ?? "//eventferry/outbox/WakerTargetService";
+  const initSvc = opts.initiatorServiceName ?? "//eventferry/outbox/WakerInitiatorService";
+  const contract = opts.contractName ?? "//eventferry/outbox/WakerContract";
+  const msgType = opts.messageTypeName ?? "//eventferry/outbox/Wakeup";
+
+  return `
+-- 1. Azure SQL Database refusal: Service Broker is unsupported (EngineEdition=5).
+--    RAISERROR + RETURN exits this batch cleanly without leaving partial state.
+IF CAST(SERVERPROPERTY('EngineEdition') AS int) = 5
+BEGIN
+    RAISERROR(N'Service Broker is unsupported on Azure SQL Database (EngineEdition=5). Use the polling-only relay (omit the waker), or migrate to Azure SQL Managed Instance.', 16, 1);
+    RETURN;
+END;
+
+-- 2. Enable broker. Skip on Managed Instance (EngineEdition=8) — broker is
+--    already on there and ALTER DATABASE ... SET ENABLE_BROKER is disallowed.
+--    Skip when is_broker_enabled = 1 so re-runs are no-ops.
+IF CAST(SERVERPROPERTY('EngineEdition') AS int) <> 8
+BEGIN
+    DECLARE @db sysname = DB_NAME();
+    IF NOT EXISTS (
+        SELECT 1 FROM sys.databases WHERE name = @db AND is_broker_enabled = 1
+    )
+    BEGIN
+        DECLARE @enableBrokerSql nvarchar(max) =
+            N'ALTER DATABASE ' + QUOTENAME(@db) + N' SET ENABLE_BROKER WITH ROLLBACK IMMEDIATE;';
+        EXEC sp_executesql @enableBrokerSql;
+    END
+END;
+
+-- 3. Wakeup message type. Idempotent.
+IF NOT EXISTS (SELECT 1 FROM sys.service_message_types WHERE name = N'${msgType}')
+    CREATE MESSAGE TYPE [${msgType}] VALIDATION = NONE;
+
+-- 4. Contract binding the message type SENT BY INITIATOR. Idempotent.
+IF NOT EXISTS (SELECT 1 FROM sys.service_contracts WHERE name = N'${contract}')
+    CREATE CONTRACT [${contract}] ([${msgType}] SENT BY INITIATOR);
+
+-- 5. Target queue (waker RECEIVEs here). POISON_MESSAGE_HANDLING OFF because
+--    the waker commits without re-raising — the 5-rollback auto-disable would
+--    only be a footgun. RETENTION OFF because we never replay wake messages.
+IF NOT EXISTS (
+    SELECT 1 FROM sys.service_queues sq
+    JOIN sys.schemas ss ON ss.schema_id = sq.schema_id
+    WHERE sq.name = N'${q}' AND ss.name = N'${s}'
+)
+    CREATE QUEUE [${s}].[${q}]
+        WITH STATUS = ON,
+             RETENTION = OFF,
+             POISON_MESSAGE_HANDLING (STATUS = OFF);
+
+-- 6. Initiator queue. Drained by the cleanup activation proc below.
+IF NOT EXISTS (
+    SELECT 1 FROM sys.service_queues sq
+    JOIN sys.schemas ss ON ss.schema_id = sq.schema_id
+    WHERE sq.name = N'${iq}' AND ss.name = N'${s}'
+)
+    CREATE QUEUE [${s}].[${iq}]
+        WITH STATUS = ON,
+             RETENTION = OFF,
+             POISON_MESSAGE_HANDLING (STATUS = OFF);
+
+-- 7. Target + initiator services bound to the contract. Idempotent.
+IF NOT EXISTS (SELECT 1 FROM sys.services WHERE name = N'${svc}')
+    CREATE SERVICE [${svc}]
+        ON QUEUE [${s}].[${q}] ([${contract}]);
+
+IF NOT EXISTS (SELECT 1 FROM sys.services WHERE name = N'${initSvc}')
+    CREATE SERVICE [${initSvc}]
+        ON QUEUE [${s}].[${iq}] ([${contract}]);
+
+-- 8. Initiator-cleanup activation procedure.
+--    Correctness lens: END CONVERSATION on the INITIATOR side immediately
+--    after SEND (in the trigger, step 10) is safe ONLY because this proc
+--    continually drains the resulting EndDialog + Error messages from the
+--    initiator queue. Without it, sys.conversation_endpoints grows
+--    unbounded until queue starvation.
+EXEC(N'
+CREATE OR ALTER PROCEDURE [${s}].[${cleanupProc}]
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @h UNIQUEIDENTIFIER;
+    WHILE 1 = 1
+    BEGIN
+        WAITFOR (
+            RECEIVE TOP (1) @h = conversation_handle
+            FROM [${s}].[${iq}]
+        ), TIMEOUT 1000;
+        IF @h IS NULL BREAK;
+        BEGIN TRY END CONVERSATION @h; END TRY BEGIN CATCH END CATCH
+        SET @h = NULL;
+    END
+END;
+');
+
+-- 9. Wire activation: cleanup proc drains the initiator queue.
+--    MAX_QUEUE_READERS = 1 guarantees single-reader semantics on cleanup;
+--    EXECUTE AS OWNER avoids per-user permission entanglement.
+ALTER QUEUE [${s}].[${iq}]
+    WITH ACTIVATION (
+        STATUS = ON,
+        PROCEDURE_NAME = [${s}].[${cleanupProc}],
+        MAX_QUEUE_READERS = 1,
+        EXECUTE AS OWNER
+    );
+
+-- 10. AFTER INSERT trigger on the outbox table.
+--     Correctness lens: ONE BEGIN DIALOG + SEND per STATEMENT (guarded by
+--     EXISTS on inserted), NOT per row — bulk inserts of N rows produce
+--     ONE wake message, keeping queue depth proportional to write traffic,
+--     not row count. END CONVERSATION fires immediately on the initiator
+--     side (fire-and-forget wakeup); safety relies on the initiator-cleanup
+--     activation proc (step 8) draining the resulting endpoint messages.
+EXEC(N'
+CREATE OR ALTER TRIGGER [${s}].[${trg}]
+ON [${s}].[${t}]
+AFTER INSERT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    IF NOT EXISTS (SELECT 1 FROM inserted) RETURN;
+    DECLARE @h UNIQUEIDENTIFIER;
+    BEGIN TRY
+        BEGIN DIALOG CONVERSATION @h
+            FROM SERVICE [${initSvc}]
+            TO   SERVICE N''${svc}''
+            ON CONTRACT [${contract}]
+            WITH ENCRYPTION = OFF, LIFETIME = 3600;
+        SEND ON CONVERSATION @h
+            MESSAGE TYPE [${msgType}]
+            (CAST(N''wake'' AS VARBINARY(MAX)));
+        END CONVERSATION @h;
+    END TRY
+    BEGIN CATCH
+        -- Severity 10 = informational, does NOT fail the user INSERT.
+        -- The polling relay backstops any lost wake.
+        DECLARE @msg NVARCHAR(2048) = ERROR_MESSAGE();
+        RAISERROR(N''eventferry waker SEND failed: %s'', 10, 1, @msg) WITH LOG;
+    END CATCH
+END;
+');
+`.trim();
+}
