@@ -1,0 +1,80 @@
+{
+  "name": "@eventferry/mssql",
+  "version": "1.0.0",
+  "description": "SQL Server (Azure SQL DB / on-prem) outbox store adapter for @eventferry",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./migrations": {
+      "types": "./dist/migrations.d.ts",
+      "import": "./dist/migrations.js",
+      "require": "./dist/migrations.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "CHANGELOG.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "outbox",
+    "outbox-pattern",
+    "transactional-outbox",
+    "mssql",
+    "sql-server",
+    "sqlserver",
+    "azure-sql",
+    "tedious",
+    "event-driven",
+    "event-publishing",
+    "microservices",
+    "nodejs",
+    "typescript"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SametGoktepe/eventferry.git",
+    "directory": "packages/mssql"
+  },
+  "homepage": "https://github.com/SametGoktepe/eventferry/tree/main/packages/mssql#readme",
+  "bugs": "https://github.com/SametGoktepe/eventferry/issues",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@eventferry/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "mssql": ">=10.0.0 <13.0.0"
+  },
+  "peerDependenciesMeta": {
+    "mssql": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@eventferry/core": "workspace:*",
+    "@types/mssql": "^12.3.0",
+    "@types/node": "^20.0.0",
+    "mssql": "^11.0.1",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2",
+    "vitest": "^3.2.6"
+  }
+}

@@ -1,4 +1,5 @@
 import { Kafka } from "kafkajs";
+import * as mssql from "mssql";
 import mysql from "mysql2/promise";
 import { Pool } from "pg";
 
@@ -63,6 +64,54 @@ export function newMariadbPool(): mysql.Pool {
     bigNumberStrings: true,
     dateStrings: false,
   });
+}
+
+export interface MssqlConnectionInfo {
+  host: string;
+  port: number;
+  user: string;
+  password: string;
+  database: string;
+}
+
+export function mssqlInfo(): MssqlConnectionInfo {
+  const host = process.env.MSSQL_HOST;
+  const port = process.env.MSSQL_PORT;
+  const user = process.env.MSSQL_USER;
+  const password = process.env.MSSQL_PASSWORD;
+  const database = process.env.MSSQL_DATABASE;
+  if (!host || !port || !user || !password || !database) {
+    throw new Error("MSSQL_* env vars not set (global setup did not run?)");
+  }
+  return { host, port: Number(port), user, password, database };
+}
+
+export async function newMssqlPool(): Promise<mssql.ConnectionPool> {
+  const info = mssqlInfo();
+  const pool = new mssql.ConnectionPool({
+    server: info.host,
+    port: info.port,
+    user: info.user,
+    password: info.password,
+    database: info.database,
+    // Testcontainer ships a self-signed cert and does not require TLS for
+    // the local mapped port; encrypt=false keeps the handshake cheap and
+    // trustServerCertificate=true guards us if a driver default flips to
+    // encrypt=true on us.
+    options: {
+      trustServerCertificate: true,
+      encrypt: false,
+    },
+    pool: {
+      min: 0,
+      max: 10,
+    },
+    // Above any test scenario; some claim-batch / purge cycles can take a
+    // while on a cold container.
+    requestTimeout: 120_000,
+  });
+  await pool.connect();
+  return pool;
 }
 
 export function brokers(): string[] {
