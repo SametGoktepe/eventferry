@@ -1,7 +1,7 @@
 {
   "name": "@eventferry/all",
   "version": "3.2.6",
-  "description": "Meta-package: installs and re-exports all of eventferry (core + postgres + mysql + kafka + schema-registry)",
+  "description": "Meta-package: installs and re-exports all of eventferry (core + postgres + mysql + mssql + mssql-cdc-relay + kafka + kafka-iam + schema-registry)",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -40,6 +40,11 @@
     "postgresql",
     "mysql",
     "mariadb",
+    "mssql",
+    "sql-server",
+    "azure-sql",
+    "msk",
+    "aws-msk-iam",
     "schema-registry",
     "microservices",
     "distributed-systems",
@@ -64,7 +69,10 @@
     "@eventferry/core": "workspace:*",
     "@eventferry/postgres": "workspace:*",
     "@eventferry/mysql": "workspace:*",
+    "@eventferry/mssql": "workspace:*",
+    "@eventferry/mssql-cdc-relay": "workspace:*",
     "@eventferry/kafka": "workspace:*",
+    "@eventferry/kafka-iam": "workspace:*",
     "@eventferry/schema-registry": "workspace:*"
   },
   "devDependencies": {

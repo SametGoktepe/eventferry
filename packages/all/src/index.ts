@@ -1,17 +1,25 @@
 // Meta-package: re-exports the entire eventferry surface so consumers can
-// `npm i @eventferry/all` and `import { Relay, PostgresStore, MysqlStore,
-// KafkaPublisher, SchemaRegistrySerializer, defineOutbox, ... } from "@eventferry/all"`.
+// `npm i @eventferry/all` and import every adapter (Postgres / MySQL / MSSQL
+// + the MSSQL CDC waker), the Kafka publisher + MSK IAM helper, and the
+// Schema Registry serializer from one place.
 //
-// Postgres is re-exported flat for backwards compatibility (it shipped first).
-// MySQL has structurally identical names for some helpers / types (e.g.
-// `createMigrationSql`, `PurgeDoneOptions`, `DecodedInsert`), so its exports
-// are renamed here with the `Mysql` prefix to avoid ambiguity. Users wanting
-// the unprefixed MySQL names should import directly from `@eventferry/mysql`.
+// Naming convention for cross-adapter collisions:
+//   - Postgres is re-exported FLAT for backwards compatibility (it shipped
+//     first; `createMigrationSql`, `PurgeDoneOptions`, etc. without a prefix
+//     refer to Postgres).
+//   - MySQL + MSSQL collide on the same names (`createMigrationSql`,
+//     `MssqlStore`/`MysqlStore`, `PurgeDoneOptions`, `DecodedInsert`),
+//     so their exports are renamed with `Mysql*` / `Mssql*` prefixes here.
+//   - Users wanting the unprefixed names should import directly from the
+//     individual `@eventferry/<adapter>` package.
+
+// ── Flat re-exports (Postgres, Kafka, Schema Registry) ───────────────────
 export * from "@eventferry/core";
 export * from "@eventferry/postgres";
 export * from "@eventferry/kafka";
 export * from "@eventferry/schema-registry";
 
+// ── MySQL adapter (prefixed) ─────────────────────────────────────────────
 export {
   MysqlStore,
   MysqlBinlogRelay,
@@ -29,3 +37,42 @@ export {
   type DecodedInsert as MysqlDecodedInsert,
   type PurgeDoneOptions as MysqlPurgeDoneOptions,
 } from "@eventferry/mysql";
+
+// ── MSSQL adapter (prefixed) ─────────────────────────────────────────────
+export {
+  MssqlStore,
+  MssqlServiceBrokerWaker,
+  createMigrationSql as createMssqlMigrationSql,
+  createRetentionIndexSql as createMssqlRetentionIndexSql,
+  createServiceBrokerSetupSql,
+  rowToRecord as mssqlRowToRecord,
+  type MssqlStoreOptions,
+  type MssqlServiceBrokerWakerOptions,
+  type OutboxRow as MssqlOutboxRow,
+  type PurgeDoneOptions as MssqlPurgeDoneOptions,
+} from "@eventferry/mssql";
+
+// ── MSSQL CDC relay (prefixed) ───────────────────────────────────────────
+export {
+  MssqlCdcWaker,
+  MssqlCdcRelay,
+  createCdcEnablementSql,
+  compareLsn,
+  lsnToHex,
+  lsnFromHex,
+  ZERO_LSN,
+  type Lsn,
+  type MssqlCdcWakerOptions,
+  CdcRelayError,
+  CdcNotEnabledError,
+  CdcRetentionExceededError,
+  WatermarkBelowMinLsnError,
+  CdcCaptureJobStoppedError,
+} from "@eventferry/mssql-cdc-relay";
+
+// ── AWS MSK IAM helper ───────────────────────────────────────────────────
+export {
+  createMskIamSasl,
+  type MskIamSaslOptions,
+  type MskIamSigner,
+} from "@eventferry/kafka-iam";

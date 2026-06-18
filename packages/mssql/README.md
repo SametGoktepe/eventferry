@@ -277,27 +277,156 @@ locks on top, which serialize the claim path and defeat `READPAST`.
 The default RC / RCSI behaviour is what you want, and the table hint handles
 the rest.
 
-## Waker: polling only in v1
+## Waker options
 
-The polling claim loop has no native low-latency waker in v1. The two viable
-SQL Server primitives both have hard problems:
+The polling claim loop runs on its own and gives you 250ms–1s latency out of
+the box. If you need tighter latency, two waker paths are available, each
+with its own deployment-target constraints:
 
-- **Service Broker `WAITFOR (RECEIVE …)`** ties up a pool connection
-  *indefinitely* waiting for a message. Pool sizing becomes mandatory and the
-  maintained Node bindings for Service Broker are abandoned. This is the
-  intended v2 path, but it needs a dedicated connection pool concept that
-  doesn't exist in `mssql` today.
-- **CDC streaming** is the right log-based source but requires SQL Agent
-  (so not available on Azure SQL Database — see next section).
+| Path                          | Latency target | Works on                                                | Does NOT work on                  |
+| ----------------------------- | -------------- | ------------------------------------------------------- | --------------------------------- |
+| Polling only (default)        | 250ms–1s       | All targets                                             | —                                 |
+| Service Broker waker (below)  | sub-second     | On-prem SQL Server, Azure SQL Managed Instance          | Azure SQL Database                |
+| CDC-driven waker (separate)   | sub-second     | On-prem SQL Server with SQL Server Agent                | Azure SQL Database, Azure SQL MI* |
 
-For v1, tune `pollIntervalMs` down (e.g. 100ms) if you need sub-second
-latency, or use a different adapter (`@eventferry/postgres` ships `LISTEN/NOTIFY`).
+\* Azure SQL MI has CDC but SQL Agent semantics differ enough that the CDC
+relay is currently scoped to on-prem only — see
+`@eventferry/mssql-cdc-relay` for the current target matrix.
 
-## CDC streaming relay: deferred to a separate package
+## Sub-second wake with Service Broker (optional)
+
+`MssqlServiceBrokerWaker` lets the polling relay pick up enqueues with
+sub-second latency by waiting on a Service Broker queue that's pinged by an
+`AFTER INSERT` trigger on the outbox table. The store remains the source of
+truth — Service Broker is **only** a wake signal, not a delivery channel.
+
+**When to use it.** On-prem SQL Server or Azure SQL Managed Instance where
+the polling default of 250ms–1s wake latency is not tight enough.
+
+**When NOT to use it.** Azure SQL Database — Microsoft does not support
+Service Broker on Azure SQL DB. `start()` calls
+`SELECT SERVERPROPERTY('EngineEdition')` and refuses to run on engine edition
+`5` (Azure SQL DB) with a clear error. Just don't pass a waker on Azure SQL
+DB; the polling relay still works unchanged against the same store.
+
+### Setup (one-time, idempotent)
+
+```ts
+import { createServiceBrokerSetupSql } from "@eventferry/mssql";
+
+await pool.request().batch(
+  createServiceBrokerSetupSql({ schema: "dbo", table: "outbox" }),
+);
+```
+
+`createServiceBrokerSetupSql` is **idempotent** — every object is guarded
+with an `IF NOT EXISTS` / `OBJECT_ID` check, so re-running the script on a
+deployed database is a no-op. The objects it creates:
+
+1. **Message type** `//eventferry/outbox/wake` — empty body, used only as a
+   signal.
+2. **Contract** `//eventferry/outbox/wake/contract` — one-way send from
+   initiator to target.
+3. **Target queue** + **target service** — what the waker `RECEIVE`s from.
+4. **Initiator queue** + **initiator service** — where outbound dialog
+   handles land; sweep-cleaned by the cleanup activation procedure.
+5. **Cleanup activation procedure** — drains `EndDialog` and `Error`
+   messages on the initiator queue (see Rusanu cleanup note below).
+6. **`AFTER INSERT` trigger** on `[schema].[outbox]` — opens a conversation
+   on commit and `SEND`s the wake message. The trigger is intentionally
+   minimal (no row data, no payload copy) so insert latency stays flat.
+
+### Runtime (pass to the Relay)
+
+The waker needs a **dedicated connection pool** — separate from the main
+store pool — because `WAITFOR (RECEIVE …)` holds the connection slot for
+as long as it's waiting. Sharing the store's pool starves `claimBatch` and
+`enqueue` and produces pool-exhaustion errors under any real load.
+
+```ts
+import * as sql from "mssql";
+import { Relay } from "@eventferry/core";
+import { KafkaPublisher } from "@eventferry/kafka";
+import {
+  MssqlStore,
+  MssqlServiceBrokerWaker,
+} from "@eventferry/mssql";
+
+// Main store pool — sized for enqueue + claim + reap.
+const storePool = await new sql.ConnectionPool({ /* ... */ }).connect();
+storePool.on("error", (err) => console.error("[mssql store pool]", err));
+
+// Dedicated waker pool — size 1 is enough; this pool just parks on WAITFOR.
+const wakerPool = await new sql.ConnectionPool({
+  /* same connection settings */
+  pool: { min: 1, max: 1 },
+}).connect();
+wakerPool.on("error", (err) => console.error("[mssql waker pool]", err));
+
+const store = new MssqlStore({ pool: storePool });
+const publisher = new KafkaPublisher({ /* ... */ });
+
+const waker = new MssqlServiceBrokerWaker({
+  pool: wakerPool,
+  schema: "dbo",
+  table: "outbox",
+});
+
+const relay = new Relay({ store, publisher, waker });
+await relay.start();
+```
+
+### Rusanu cleanup: conversation-endpoint drain
+
+The initiator-side cleanup activation procedure exists to drain `EndDialog`
+and `Error` system messages from the initiator queue. Without it,
+`sys.conversation_endpoints` grows unbounded as every wake `SEND` leaves
+behind a closed-but-not-acknowledged endpoint, and Service Broker eventually
+takes down the database with `9737` / `9617` / endpoint-table pressure.
+This is the well-known Rémus Rusanu cleanup pattern; the setup script wires
+it for you so you don't have to. The cleanup proc activates on the
+initiator queue itself (`WITH ACTIVATION`), so it runs without external
+scheduling.
+
+### Graceful shutdown
+
+```ts
+process.on("SIGTERM", async () => {
+  await relay.stop();
+  await waker.stop();       // cancels the in-flight WAITFOR
+  await storePool.close();
+  await wakerPool.close();  // the waker owns its pool — close it explicitly
+});
+```
+
+`waker.stop()` cancels any in-flight `WAITFOR (RECEIVE …)` (the call
+returns control even if the queue was empty) and closes the dedicated pool
+so SIGTERM doesn't hang on the WAITFOR slot.
+
+### Polling-only fallback
+
+If Service Broker is unavailable (Azure SQL DB) or you don't want a second
+pool, **just don't pass a waker**. The polling `Relay` works unchanged
+against the same store — no DDL changes, no migration to undo:
+
+```ts
+const relay = new Relay({ store, publisher }); // polling, 250ms–1s wake
+```
+
+You can also tune `pollIntervalMs` down (e.g. 100ms) if you need somewhere
+between polling and Service Broker without taking on the extra pool.
+
+## CDC-driven waker / streaming relay (separate package)
 
 A SQL Server CDC streaming relay (the rough equivalent of `MysqlBinlogRelay`
-or `PostgresStreamingRelay`) is **deferred to a separate
-`@eventferry/mssql-cdc-relay` package**. Two reasons it's not bundled:
+or `PostgresStreamingRelay`) is shipped as a separate
+**`@eventferry/mssql-cdc-relay`** package. It targets on-prem SQL Server
+with **SQL Server Agent** enabled, and is **not** available on Azure SQL
+Database (no SQL Agent). Use it instead of the Service Broker waker when
+you already have CDC enabled for analytics / downstream replication and
+want the relay to piggyback on the same change-table tailing.
+
+Two reasons it's not bundled into `@eventferry/mssql`:
 
 1. **CDC is unavailable on Azure SQL Database** — it requires SQL Server
    Agent, which Azure SQL Database does not provide. Bundling it would force
@@ -308,9 +437,9 @@ or `PostgresStreamingRelay`) is **deferred to a separate
    contract that's substantively different from the polling claim loop.
    It's its own package.
 
-If you need log-based streaming on SQL Server today, your options are:
-on-prem / SQL MI → wait for `@eventferry/mssql-cdc-relay`, or tune the
-polling interval down on `@eventferry/mssql`.
+If you need log-based streaming on SQL Server today: on-prem → use
+`@eventferry/mssql-cdc-relay`. Azure SQL DB → polling or tune
+`pollIntervalMs` down on `@eventferry/mssql`.
 
 ## Retention
 

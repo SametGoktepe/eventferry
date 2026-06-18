@@ -3,7 +3,7 @@
 [![npm](https://img.shields.io/npm/v/@eventferry/kafka.svg)](https://www.npmjs.com/package/@eventferry/kafka)
 
 The **Kafka / Redpanda publisher** for [eventferry](https://github.com/SametGoktepe/eventferry) —
-a transactional outbox toolkit for PostgreSQL + Kafka/Redpanda.
+a transactional outbox toolkit for PostgreSQL / MySQL / MariaDB / MSSQL + Kafka/Redpanda.
 
 One `KafkaPublisher` over two interchangeable drivers — `kafkajs` (pure JS) and
 `@confluentinc/kafka-javascript` (librdkafka-backed) — with idempotent and optional

@@ -1,6 +1,6 @@
 <h1 align="center">Eventferry</h1>
 <p align="center">
-  Transactional outbox for <b>PostgreSQL + Kafka/Redpanda</b> — reliable event publishing for Node.js &amp; TypeScript.<br>
+  Transactional outbox for <b>PostgreSQL, MySQL/MariaDB, SQL Server</b> + <b>Kafka/Redpanda</b> — reliable event publishing for Node.js &amp; TypeScript.<br>
   Write your data and your events in <b>one transaction</b>; eventferry ferries them to the broker — at&#8209;least&#8209;once, in order, with retries and dead&#8209;lettering.
 </p>
 
@@ -15,10 +15,11 @@
 </p>
 
 ```
-┌─────────────┐   one TX     ┌──────────────┐   relay     ┌───────────────┐
-│  your code  │ ───────────▶ │  outbox tbl  │ ──────────▶ │ Kafka/Redpanda│
-│ (order svc) │   (atomic)   │  (Postgres)  │   publish   │     topic     │
-└─────────────┘              └──────────────┘             └───────────────┘
+┌─────────────┐   one TX     ┌────────────────────────┐   relay     ┌───────────────┐
+│  your code  │ ───────────▶ │      outbox tbl        │ ──────────▶ │ Kafka/Redpanda│
+│ (order svc) │   (atomic)   │ (Postgres / MySQL /    │   publish   │     topic     │
+│             │              │   MariaDB / SQL Server)│             │               │
+└─────────────┘              └────────────────────────┘             └───────────────┘
 ```
 
 eventferry implements the **transactional outbox** pattern so you don't have to
@@ -30,16 +31,18 @@ those rows to the broker. The database is the source of truth; nothing is lost o
 ## Features
 
 * ✅ **Atomic** — your data and its event commit together, or not at all. No lost or phantom events.
+* 🗄️ **Three shipped databases** — **PostgreSQL**, **MySQL / MariaDB**, and **SQL Server** behind one `OutboxStore` contract.
 * 🔁 **At-least-once delivery** with idempotent producers (pair with idempotent consumers).
 * 🔢 **Strict per-aggregate ordering** — events for the same entity arrive in order, even across many relays and retries.
 * ♻️ **Retries** with fixed / linear / exponential backoff + jitter, and **dead-letter** routing for poison messages.
+* 🏷️ **Typed `errorKind` taxonomy** — `retriable` / `fatal` / `poison` / `backpressure` / `quota` / `fenced` — so you can route DLQ records, alerts, and circuit-breakers without parsing error strings.
 * 🛟 **Crash recovery** — work orphaned by a dead relay is reclaimed automatically (visibility timeout).
-* ⚡ **Horizontal scale** — run any number of relays against one table, lock-free (`FOR UPDATE SKIP LOCKED`).
+* ⚡ **Horizontal scale** — run any number of relays against one table, lock-free (`FOR UPDATE SKIP LOCKED` on Postgres/MySQL, `READPAST` on SQL Server).
 * 🧷 **Type-safe, schema-validated events** (optional) — a bad payload can't reach the outbox. Any [Standard Schema](https://standardschema.dev) (Zod, Valibot, ArkType…).
-* 🚀 **Low-latency modes** — `LISTEN/NOTIFY` wake-ups, or WAL streaming (logical replication) when polling isn't fast enough.
-* 🧰 **Two Kafka clients** — `kafkajs` and `@confluentinc/kafka-javascript` behind one API.
+* 🚀 **Low-latency modes** — Postgres `LISTEN/NOTIFY` or WAL streaming; SQL Server **Service Broker** waker for sub-second wake on-prem + Azure SQL Managed Instance; CDC relay as a separate package.
+* 🧰 **Two Kafka clients** — `kafkajs` and `@confluentinc/kafka-javascript` behind one API, plus an AWS **MSK IAM** helper.
 * 📦 **Schema Registry** — Avro / Protobuf / JSON Schema via Confluent Schema Registry.
-* 🔭 **Observability** — metrics hooks + W3C / OpenTelemetry trace propagation.
+* 🔭 **Observability** — metrics hooks + **W3C / OpenTelemetry trace propagation on both sides** (`publisher.tracer.inject` at enqueue, `extractTraceContext` for consumers).
 * 🪶 **Zero runtime dependencies** in the core; everything else is an optional peer.
 
 ## Quick start
@@ -90,6 +93,14 @@ process.on("SIGTERM", () => relay.stop());
 
 That's the whole pattern. Everything below is optional power.
 
+> **MySQL / MariaDB and SQL Server work the same way** — swap `PostgresStore` for
+> `MySqlStore` from [`@eventferry/mysql`](./packages/mysql) or `MssqlStore` from
+> [`@eventferry/mssql`](./packages/mssql). Same `enqueue` / `Relay` API, same ordering and
+> crash-recovery semantics. See each package's README for the per-driver examples (`mysql2`
+> for MySQL/MariaDB, `mssql` for SQL Server), and the
+> **[23-page Wiki](https://github.com/SametGoktepe/eventferry/wiki)** for end-to-end
+> recipes, ops guides, and the per-database capability matrix.
+
 ## Why eventferry?
 
 Most outbox libraries lock you to one Kafka client, only poll, and skip ordering,
@@ -97,15 +108,16 @@ idempotency, or crash recovery. eventferry is a complete, production-grade toolk
 
 | Concern | eventferry | Typical outbox lib |
 | --- | --- | --- |
-| Kafka client | **kafkajs *and* confluent** behind one API | one, hard-coded |
+| Databases | **Postgres, MySQL/MariaDB, SQL Server** behind one contract | usually one |
+| Kafka client | **kafkajs *and* confluent** behind one API (+ MSK IAM helper) | one, hard-coded |
 | Delivery | idempotent + optional transactional (EOS) | best-effort |
 | Ordering | **strict per-aggregate**, across relays & retries | none / global only |
-| Retries & DLQ | backoff + jitter → dead-letter topic | basic / none |
+| Retries & DLQ | backoff + jitter → dead-letter topic, typed `errorKind` taxonomy | basic / none |
 | Crash recovery | visibility-timeout reaper | rows can get stuck |
-| Latency | poll **+ LISTEN/NOTIFY + WAL streaming** | poll only |
+| Latency | poll **+ LISTEN/NOTIFY + WAL streaming** (Postgres), **Service Broker waker + CDC relay** (SQL Server) | poll only |
 | Type safety | typed + schema-validated payloads | `any` |
 | Serialization | JSON + Schema Registry (Avro/Proto/JSON) | JSON |
-| Tracing | W3C / OpenTelemetry propagation | none |
+| Tracing | **W3C / OpenTelemetry propagation on both producer and consumer** | none |
 | Footprint | zero-dep core; storage/broker pluggable | varies |
 
 ## What eventferry is *not*
@@ -119,12 +131,12 @@ idempotency, or crash recovery. eventferry is a complete, production-grade toolk
 
 **Use eventferry when:**
 
-* You write to **PostgreSQL** and publish to **Kafka or Redpanda** in the same business operation, and you can't afford the database and broker to disagree.
+* You write to **PostgreSQL, MySQL / MariaDB, or SQL Server** and publish to **Kafka or Redpanda** in the same business operation, and you can't afford the database and broker to disagree.
 * You're building **microservices** with an **event-driven architecture** and need reliable event publishing without losing messages on crashes.
 * You need **strict per-aggregate ordering** (e.g. all events for `order:42` published in the order they happened) — even with many relays running.
 * You want **at-least-once delivery** with retries, backoff, jitter, and a dead-letter queue out of the box.
 * You want a **Node.js / TypeScript** library and a small, focused dependency tree — not a JVM-heavy CDC platform.
-* You need **CDC-style throughput** without operating Kafka Connect: eventferry can stream straight from Postgres WAL.
+* You need **CDC-style throughput** without operating Kafka Connect: eventferry can stream straight from Postgres WAL, and ships a separate SQL Server CDC relay (`@eventferry/mssql-cdc-relay`) for sub-second waking on SQL Server.
 
 **Don't use eventferry when:**
 
@@ -137,7 +149,7 @@ idempotency, or crash recovery. eventferry is a complete, production-grade toolk
 
 | Alternative | What it is | When eventferry is better |
 | --- | --- | --- |
-| **Debezium / Kafka Connect** | JVM-based CDC platform that tails the database log and publishes changes to Kafka. | You want a **Node.js library** instead of a JVM cluster, no Kafka Connect to operate, and a typed event registry instead of raw row-change events. eventferry can still use Postgres WAL streaming for similar throughput. |
+| **Debezium / Kafka Connect** | JVM-based CDC platform that tails the database log and publishes changes to Kafka. | You want a **Node.js library** instead of a JVM cluster, no Kafka Connect to operate, and a typed event registry instead of raw row-change events. eventferry can still use Postgres WAL streaming or SQL Server CDC for similar throughput. |
 | **pg-boss / BullMQ** | Background job queues backed by Postgres or Redis. | These are *job queues*, not outboxes — they're not designed for atomic dual-write with your business transaction or for publishing to Kafka. Use them for jobs, use eventferry for events. |
 | **Custom outbox table** (DIY) | Hand-rolled outbox table + a cron / worker that polls and publishes. | You skip writing (and maintaining) the parts that are easy to get wrong: skip-locked claiming under concurrent relays, per-aggregate ordering, crash-recovery reaper, retry/backoff, DLQ routing, Schema Registry serialization, and CDC. |
 | **Publishing to Kafka after DB commit** (naive) | `await db.commit(); await kafka.send(...)`. | This is exactly the **dual-write problem** eventferry exists to solve: a crash between the two calls drops the event. |
@@ -156,8 +168,16 @@ Or install only the pieces you use (smaller dependency tree) — the core, a sto
 adapter, a broker adapter, and your chosen Kafka client:
 
 ```bash
-# core engine + Postgres store + Kafka publisher + the pg driver
+# core engine + Kafka publisher + ONE storage adapter (pick the one you need):
+
+# PostgreSQL:
 npm i @eventferry/core @eventferry/postgres @eventferry/kafka pg
+
+# MySQL / MariaDB:
+npm i @eventferry/core @eventferry/mysql @eventferry/kafka mysql2
+
+# SQL Server (on-prem, Azure SQL Managed Instance, or Azure SQL DB):
+npm i @eventferry/core @eventferry/mssql @eventferry/kafka mssql
 
 # pick ONE Kafka client (both are optional peers):
 npm i kafkajs                          # pure JS, zero native deps
@@ -165,12 +185,15 @@ npm i @confluentinc/kafka-javascript   # librdkafka-backed, higher throughput
 
 # optional add-ons:
 npm i @eventferry/schema-registry @kafkajs/confluent-schema-registry  # Avro/Proto/JSON
-npm i pg-logical-replication                                          # WAL streaming mode
+npm i pg-logical-replication                                          # Postgres WAL streaming mode
+npm i @eventferry/mssql-cdc-relay                                     # SQL Server CDC-driven sub-second waker
+npm i @eventferry/kafka-iam aws-msk-iam-sasl-signer-js                # AWS MSK IAM auth helper
 ```
 
 > **Note**
-> Requires Node.js 18+, PostgreSQL 13+, and Kafka or Redpanda. The streaming relay also
-> needs `wal_level = logical` on the server.
+> Requires Node.js 18+, Kafka or Redpanda, and one of: PostgreSQL 13+, MySQL 8.0.1+ /
+> MariaDB 10.6+, or SQL Server 2017+ (incl. Azure SQL DB and Managed Instance). The
+> Postgres streaming relay also needs `wal_level = logical` on the server.
 
 ## Usage
 
@@ -320,8 +343,15 @@ new Relay({ store, publisher, serializer }); // also works with PostgresStreamin
 
 ### Tracing (W3C / OpenTelemetry)
 
-A `traceparent` captured at enqueue rides to the published message on every path, so the
-consumer continues the trace. The library depends on **no** tracing package:
+End-to-end W3C trace propagation works on **both** sides without pulling a tracing package
+into eventferry itself:
+
+- **Producer side** — a `traceparent` captured at enqueue rides to the published message
+  on every path (polling relay, notify-driven, streaming, SQL Server Service Broker /
+  CDC). You wire it in via `publisher.tracer.inject` or the store's `tracing.inject`.
+- **Consumer side** — `extractTraceContext(headers)` from `@eventferry/kafka/consume`
+  parses the `traceparent` / `tracestate` headers your relay wrote, so a CONSUMER span
+  can be started as the child of the producer's span.
 
 ```ts
 import { propagation, context } from "@opentelemetry/api";
@@ -368,7 +398,7 @@ await consumer.run({
 
 ### Consuming the DLQ
 
-When a record exhausts `retry.maxAttempts` (or hits a `fatal` / `poison` error), the relay calls `publishToDlq` and the message lands on `${topic}.dlq` (or your configured DLQ topic) carrying enriched headers:
+When a record exhausts `retry.maxAttempts` (or hits a `fatal` / `poison` error), the relay calls `publishToDlq` and the message lands on `${topic}.dlq` (or your configured DLQ topic). The relay classifies every failure into a typed **`errorKind`** — one of `retriable`, `fatal`, `poison`, `backpressure`, `quota`, or `fenced` — which drives retry vs. DLQ vs. circuit-break decisions and lands on the DLQ headers. The DLQ message carries enriched headers:
 
 - `dlq-reason` — `error.message`
 - `dlq-error-class` — `KafkaJSProtocolError`, `RecordTooLargeException`, …
@@ -429,11 +459,14 @@ await store.purgeDone({ olderThanMs: 7 * 24 * 60 * 60 * 1000 }); // older than 7
 
 | Package | What it is |
 | --- | --- |
-| [`@eventferry/core`](./packages/core) | DB- and broker-agnostic engine: relay loop, backoff, serializer, typed registry. Zero runtime deps. |
-| [`@eventferry/postgres`](./packages/postgres) | PostgreSQL store, migration/trigger/publication SQL, notify waker, streaming relay, retention. |
-| [`@eventferry/mysql`](./packages/mysql) | MySQL 8.0.1+ / MariaDB 10.6+ store with SKIP LOCKED claim, strict per-aggregate ordering, and reaper. |
-| [`@eventferry/kafka`](./packages/kafka) | Kafka/Redpanda publisher over `kafkajs` and `confluent` drivers, with DLQ routing. |
-| [`@eventferry/schema-registry`](./packages/schema-registry) | Confluent Schema Registry serializer (Avro / Protobuf / JSON Schema). |
+| [`@eventferry/core`](./packages/core) | DB- and broker-agnostic engine: relay loop, backoff, serializer, typed registry, `errorKind` taxonomy. Zero runtime deps. |
+| [`@eventferry/postgres`](./packages/postgres) | PostgreSQL store, migration/trigger/publication SQL, `LISTEN/NOTIFY` waker, WAL streaming relay, retention. |
+| [`@eventferry/mysql`](./packages/mysql) | MySQL 8.0.1+ / MariaDB 10.6+ store with `SKIP LOCKED` claim, strict per-aggregate ordering, and reaper. |
+| [`@eventferry/mssql`](./packages/mssql) | SQL Server 2017+ / Azure SQL DB & Managed Instance store with `READPAST` claim, **Service Broker waker** for sub-second wake on-prem + Managed Instance, and reaper. |
+| [`@eventferry/mssql-cdc-relay`](./packages/mssql-cdc-relay) | Optional sub-second waker for SQL Server driven by **Change Data Capture** — shipped as a separate package so the core MSSQL store stays CDC-free. |
+| [`@eventferry/kafka`](./packages/kafka) | Kafka/Redpanda publisher over `kafkajs` and `confluent` drivers, with DLQ routing, typed auth, and a cheap `healthCheck()` reachability probe. |
+| [`@eventferry/kafka-iam`](./packages/kafka-iam) | **AWS MSK IAM** helper — SASL/OAUTHBEARER auth provider you wire into the publisher when running against Amazon MSK. |
+| [`@eventferry/schema-registry`](./packages/schema-registry) | Confluent Schema Registry serializer (Avro / Protobuf / JSON Schema), with typed basic + bearer auth. |
 | [`@eventferry/all`](./packages/all) | Meta-package — installs & re-exports all of the above. `npm i @eventferry/all` for everything in one import. |
 
 ## FAQ
@@ -460,7 +493,7 @@ Yes. Redpanda is wire-compatible with the Kafka protocol; both `kafkajs` and `@c
 
 ### What about MySQL, SQL Server, or MongoDB?
 
-The relay is database-agnostic — only the `OutboxStore` adapter is per-database. PostgreSQL ships today; MySQL/MariaDB, SQL Server, and MongoDB are next on the [roadmap](./ROADMAP.md), followed by CockroachDB, SQLite, Oracle, and DynamoDB.
+The relay is database-agnostic — only the `OutboxStore` adapter is per-database. **PostgreSQL, MySQL / MariaDB, and SQL Server ship today** ([`@eventferry/postgres`](./packages/postgres), [`@eventferry/mysql`](./packages/mysql), [`@eventferry/mssql`](./packages/mssql)). **MongoDB** is the next adapter on the [roadmap](./ROADMAP.md), followed by CockroachDB, SQLite, Oracle, and DynamoDB.
 
 ### How much operational overhead does eventferry add?
 
@@ -468,17 +501,19 @@ One database table (`outbox`), one background process (the relay — runs in you
 
 ### Is it production-ready?
 
-Yes. eventferry ships with strict per-aggregate ordering, a crash-recovery reaper, retries with backoff + jitter, DLQ routing, Schema Registry support, W3C trace propagation, and an integration test suite running against real PostgreSQL + Redpanda via Testcontainers. It is MIT-licensed and used in production.
+Yes. eventferry ships with strict per-aggregate ordering, a crash-recovery reaper, retries with backoff + jitter, DLQ routing with a typed `errorKind` taxonomy, Schema Registry support, W3C trace propagation on both producer and consumer sides, and an integration test suite running against real **PostgreSQL, MySQL, MariaDB, SQL Server, and Redpanda** via Testcontainers — including an adversarial bug-hunt suite for the Postgres + MySQL stores. It is MIT-licensed and used in production.
 
 ## Roadmap
 
 eventferry is built around a small, database-agnostic `OutboxStore` contract, so
-every new database is just a new adapter. **PostgreSQL** and **MySQL / MariaDB**
-ship today; **SQL Server** and **MongoDB** are next, with CockroachDB, SQLite,
+every new database is just a new adapter. **PostgreSQL ✅**, **MySQL / MariaDB ✅**,
+and **SQL Server ✅** ship today; **MongoDB** is next-up, with CockroachDB, SQLite,
 Oracle, and DynamoDB on the horizon.
 
 See **[ROADMAP.md](./ROADMAP.md)** for the full plan — architecture diagrams, the
-per-database capability matrix, and phase-by-phase checklists.
+per-database capability matrix, and phase-by-phase checklists — and the
+**[23-page Wiki](https://github.com/SametGoktepe/eventferry/wiki)** for ops guides,
+end-to-end recipes, and per-database tuning notes.
 
 ## Development
 
@@ -487,7 +522,7 @@ pnpm install
 pnpm build
 pnpm typecheck
 pnpm test:run          # unit tests (fakes, no infra)
-pnpm test:integration  # real Postgres + Redpanda via Testcontainers (needs Docker)
+pnpm test:integration  # real Postgres / MySQL / MariaDB / SQL Server + Redpanda via Testcontainers (needs Docker)
 ```
 
 ## Contributing
