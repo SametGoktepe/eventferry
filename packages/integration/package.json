@@ -27,7 +27,7 @@
     "kafkajs": "^2.2.4",
     "mssql": "^11.0.1",
     "mysql2": "^3.11.5",
-    "pg": "^8.13.1",
+    "pg": "^8.22.0",
     "pg-logical-replication": "^2.0.0",
     "testcontainers": "^10.0.0",
     "typescript": "^5.7.2",
