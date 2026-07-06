@@ -122,8 +122,8 @@ importers:
         specifier: ^8.11.10
         version: 8.20.0
       '@vlasky/zongji':
-        specifier: ^0.6.0
-        version: 0.6.1(@types/node@22.19.21)
+        specifier: ^0.7.1
+        version: 0.7.1(@types/node@22.19.21)
       kafkajs:
         specifier: ^2.2.4
         version: 2.2.4
@@ -1105,6 +1105,10 @@ packages:
     resolution: {integrity: sha512-803JbPT5sf1Dg6xse5VqoD1ju4S3ST7kJNaPApaFmPcoJSwzx//yM0AO7QaIHp54N+MJlZbZ7cc5ext4zC3o1g==}
     engines: {node: '>= 18.0'}
 
+  '@vlasky/zongji@0.7.1':
+    resolution: {integrity: sha512-LIgDW/GvHk4UZ15f3Bhxc7NqK0X5fdVsHyD4WCjvzA6oMfcB9C5qfr43Lc3QWw4Zld8WpoJ33nJPfYcM35Vx/w==}
+    engines: {node: '>= 18.0'}
+
   abbrev@3.0.1:
     resolution: {integrity: sha512-AO2ac6pjRB3SJmGJo+v5/aK6Omggp6fsLrs6wN9bd35ulu4cCwaAU9+7ZhXjeqHVkaHThLuzH0nZr0YpCDhygg==}
     engines: {node: ^18.17.0 || >=20.5.0}
@@ -1606,6 +1610,10 @@ packages:
     resolution: {integrity: sha512-im9DjEDQ55s9fL4EYzOAv0yMqmMBSZp6G0VvFyTMPKWxiSBHUj9NW/qqLmXUwXrrM7AvqSlTCfvqRb0cM8yYqw==}
     engines: {node: '>=0.10.0'}
 
+  iconv-lite@0.7.3:
+    resolution: {integrity: sha512-IKXpvIzjnC9XTAUbVBcMfGS0EPaIXtW6v+zr+RRp+hqULEpo0owZax6wyRwPOJbWbzjYspQwusTsfVr0ifh4uQ==}
+    engines: {node: '>=0.10.0'}
+
   ieee754@1.2.1:
     resolution: {integrity: sha512-dcyqhDvX1C46lXZcVqCpK+FtMRQVdIMN6/Df5js2zouUsqG7I6sFxitIC+7KYK29KdXOLHdu9zL4sFnoVQnqaA==}
 
@@ -1848,8 +1856,8 @@ packages:
   nan@2.27.0:
     resolution: {integrity: sha512-hC+0LidcL3XE4rp1C4H54KujgXKzbfyTngZTwBByQxsOxCEKZT0MPQ4hOKUH2jU1OYstqdDH4onyHPDzcV0XdQ==}
 
-  nanoid@3.3.14:
-    resolution: {integrity: sha512-U9kYi5bpVMEI31yC8iw4bJJp0avcHXA0W8/wNfLfnvJYzihQo2ZRPYPvpAAd570HAcCBjCTN7vnr+v4StKl1IQ==}
+  nanoid@3.3.15:
+    resolution: {integrity: sha512-y7Wygv/7mEOvxTuEQDB8StXdMRBWf1kR/tlhAzBRUFkB2jfcLOAxO/SHmOO2zgz1pVgK29/kyupn059/bCHdjA==}
     engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
     hasBin: true
 
@@ -3169,7 +3177,7 @@ snapshots:
   '@inquirer/external-editor@1.0.3(@types/node@22.19.21)':
     dependencies:
       chardet: 2.1.1
-      iconv-lite: 0.7.2
+      iconv-lite: 0.7.3
     optionalDependencies:
       '@types/node': 22.19.21
 
@@ -3587,6 +3595,13 @@ snapshots:
   '@vlasky/zongji@0.6.1(@types/node@22.19.21)':
     dependencies:
       big-integer: 1.6.52
+      iconv-lite: 0.7.2
+      mysql2: 3.22.5(@types/node@22.19.21)
+    transitivePeerDependencies:
+      - '@types/node'
+
+  '@vlasky/zongji@0.7.1(@types/node@22.19.21)':
+    dependencies:
       iconv-lite: 0.7.2
       mysql2: 3.22.5(@types/node@22.19.21)
     transitivePeerDependencies:
@@ -4107,6 +4122,10 @@ snapshots:
     dependencies:
       safer-buffer: 2.1.2
 
+  iconv-lite@0.7.3:
+    dependencies:
+      safer-buffer: 2.1.2
+
   ieee754@1.2.1: {}
 
   ignore@5.3.2: {}
@@ -4315,7 +4334,7 @@ snapshots:
 
   nan@2.27.0: {}
 
-  nanoid@3.3.14: {}
+  nanoid@3.3.15: {}
 
   native-duplexpair@1.0.0: {}
 
@@ -4452,7 +4471,7 @@ snapshots:
 
   postcss@8.5.15:
     dependencies:
-      nanoid: 3.3.14
+      nanoid: 3.3.15
       picocolors: 1.1.1
       source-map-js: 1.2.1
 
