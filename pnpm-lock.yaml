@@ -122,8 +122,8 @@ importers:
         specifier: ^8.11.10
         version: 8.20.0
       '@vlasky/zongji':
-        specifier: ^0.7.1
-        version: 0.7.1(@types/node@22.19.21)
+        specifier: ^0.9.0
+        version: 0.9.0(@types/node@22.19.21)
       kafkajs:
         specifier: ^2.2.4
         version: 2.2.4
@@ -131,8 +131,8 @@ importers:
         specifier: ^11.0.1
         version: 11.0.1
       mysql2:
-        specifier: ^3.11.5
-        version: 3.22.5(@types/node@22.19.21)
+        specifier: ^3.22.6
+        version: 3.22.6(@types/node@22.19.21)
       pg:
         specifier: ^8.22.0
         version: 8.22.0
@@ -252,8 +252,8 @@ importers:
         version: 0.6.1(@types/node@22.19.21)
     devDependencies:
       mysql2:
-        specifier: ^3.11.5
-        version: 3.22.5(@types/node@22.19.21)
+        specifier: ^3.22.6
+        version: 3.22.6(@types/node@22.20.1)
       tsup:
         specifier: ^8.3.5
         version: 8.5.1(postcss@8.5.15)(typescript@5.9.3)(yaml@2.9.0)
@@ -1053,6 +1053,9 @@ packages:
   '@types/node@22.19.21':
     resolution: {integrity: sha512-VMeFBSCKQKmm2swI2kW51SFusDqekC6q9trBCvJ/JliDchFSuoYYKN7yVNjPthP1HKZcx3U1gI/wTcEBjEFKTA==}
 
+  '@types/node@22.20.1':
+    resolution: {integrity: sha512-EANqOCF9QFyra+4pfxUcX9STKJpCLjMbObVzljIJomAWSnuSIEAvyzEU53GaajbXJEgdh0iEcPL+DGvpUd4k1Q==}
+
   '@types/pg@8.20.0':
     resolution: {integrity: sha512-bEPFOaMAHTEP1EzpvHTbmwR8UsFyHSKsRisLIHVMXnpNefSbGA1bD6CVy+qKjGSqmZqNqBDV2azOBo8TgkcVow==}
 
@@ -1105,8 +1108,8 @@ packages:
     resolution: {integrity: sha512-803JbPT5sf1Dg6xse5VqoD1ju4S3ST7kJNaPApaFmPcoJSwzx//yM0AO7QaIHp54N+MJlZbZ7cc5ext4zC3o1g==}
     engines: {node: '>= 18.0'}
 
-  '@vlasky/zongji@0.7.1':
-    resolution: {integrity: sha512-LIgDW/GvHk4UZ15f3Bhxc7NqK0X5fdVsHyD4WCjvzA6oMfcB9C5qfr43Lc3QWw4Zld8WpoJ33nJPfYcM35Vx/w==}
+  '@vlasky/zongji@0.9.0':
+    resolution: {integrity: sha512-MF3HiPZLolUdU/jIcRw2qgwYvFQB14xNPCyU/cPMAvVyo4ogxqwpOmdIwdOw8YM0deC6DT/hAKcTlXQs5+sHvQ==}
     engines: {node: '>= 18.0'}
 
   abbrev@3.0.1:
@@ -1840,8 +1843,8 @@ packages:
     engines: {node: '>=18'}
     hasBin: true
 
-  mysql2@3.22.5:
-    resolution: {integrity: sha512-95uZ2TrPWAZdwpB3vvvDbmEMcNG8yIeNCyu6GUcr/QnWEE/wXm7+mhOCsdQfWQDTV7qYT/PDUZ4U4UPP4AsXqQ==}
+  mysql2@3.22.6:
+    resolution: {integrity: sha512-fPKmeDGUzvFP7bMD5SASlJ5zIgvCC4hbanTmhbUlEmhyrY1hR4Hi3xLOWgTd3luYjLVifx6uGvMNJ2m/LlqEpg==}
     engines: {node: '>= 8.0'}
     peerDependencies:
       '@types/node': '>= 8'
@@ -2203,8 +2206,8 @@ packages:
   sprintf-js@1.1.3:
     resolution: {integrity: sha512-Oo+0REFV59/rz3gfJNKQiBlwfHaSESl1pcGyABQsnnIfWOFt6JNj5gCog2U6MLZ//IGYD+nA8nI+mTShREReaA==}
 
-  sql-escaper@1.3.3:
-    resolution: {integrity: sha512-BsTCV265VpTp8tm1wyIm1xqQCS+Q9NHx2Sr+WcnUrgLrQ6yiDIvHYJV5gHxsj1lMBy2zm5twLaZao8Jd+S8JJw==}
+  sql-escaper@1.4.0:
+    resolution: {integrity: sha512-Ti/Zx9J3aITMYUMFhCKbkplQjyi7Kk2SyYXp+rzrkyKZetIy19XbQtVZ+0ZR5aVm/178tIJ6+aVvBqXkH+Xs7w==}
     engines: {bun: '>=1.0.0', deno: '>=2.0.0', node: '>=12.0.0'}
 
   ssh-remote-port-forward@1.0.4:
@@ -3519,6 +3522,10 @@ snapshots:
     dependencies:
       undici-types: 6.21.0
 
+  '@types/node@22.20.1':
+    dependencies:
+      undici-types: 6.21.0
+
   '@types/pg@8.20.0':
     dependencies:
       '@types/node': 22.19.21
@@ -3596,14 +3603,14 @@ snapshots:
     dependencies:
       big-integer: 1.6.52
       iconv-lite: 0.7.2
-      mysql2: 3.22.5(@types/node@22.19.21)
+      mysql2: 3.22.6(@types/node@22.19.21)
     transitivePeerDependencies:
       - '@types/node'
 
-  '@vlasky/zongji@0.7.1(@types/node@22.19.21)':
+  '@vlasky/zongji@0.9.0(@types/node@22.19.21)':
     dependencies:
       iconv-lite: 0.7.2
-      mysql2: 3.22.5(@types/node@22.19.21)
+      mysql2: 3.22.6(@types/node@22.19.21)
     transitivePeerDependencies:
       - '@types/node'
 
@@ -4310,17 +4317,29 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  mysql2@3.22.5(@types/node@22.19.21):
+  mysql2@3.22.6(@types/node@22.19.21):
     dependencies:
       '@types/node': 22.19.21
       aws-ssl-profiles: 1.1.2
       denque: 2.1.0
       generate-function: 2.3.1
-      iconv-lite: 0.7.2
+      iconv-lite: 0.7.3
       long: 5.3.2
       lru.min: 1.1.4
       named-placeholders: 1.1.6
-      sql-escaper: 1.3.3
+      sql-escaper: 1.4.0
+
+  mysql2@3.22.6(@types/node@22.20.1):
+    dependencies:
+      '@types/node': 22.20.1
+      aws-ssl-profiles: 1.1.2
+      denque: 2.1.0
+      generate-function: 2.3.1
+      iconv-lite: 0.7.3
+      long: 5.3.2
+      lru.min: 1.1.4
+      named-placeholders: 1.1.6
+      sql-escaper: 1.4.0
 
   mz@2.7.0:
     dependencies:
@@ -4651,7 +4670,7 @@ snapshots:
 
   sprintf-js@1.1.3: {}
 
-  sql-escaper@1.3.3: {}
+  sql-escaper@1.4.0: {}
 
   ssh-remote-port-forward@1.0.4:
     dependencies:
