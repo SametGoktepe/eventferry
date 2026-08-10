@@ -76,7 +76,7 @@
   },
   "devDependencies": {
     "@eventferry/core": "workspace:*",
-    "@types/pg": "^8.11.10",
+    "@types/pg": "^8.20.4",
     "pg": "^8.22.0",
     "pg-logical-replication": "^2.0.0",
     "tsup": "^8.3.5",
