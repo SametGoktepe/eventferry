@@ -119,11 +119,11 @@ importers:
         specifier: ^22.10.2
         version: 22.19.21
       '@types/pg':
-        specifier: ^8.11.10
-        version: 8.20.0
+        specifier: ^8.21.0
+        version: 8.21.0
       '@vlasky/zongji':
-        specifier: ^0.7.1
-        version: 0.7.1(@types/node@22.19.21)
+        specifier: ^0.9.0
+        version: 0.9.0(@types/node@22.19.21)
       kafkajs:
         specifier: ^2.2.4
         version: 2.2.4
@@ -131,11 +131,11 @@ importers:
         specifier: ^11.0.1
         version: 11.0.1
       mysql2:
-        specifier: ^3.11.5
-        version: 3.22.5(@types/node@22.19.21)
+        specifier: ^3.23.3
+        version: 3.23.3(@types/node@22.19.21)
       pg:
-        specifier: ^8.22.0
-        version: 8.22.0
+        specifier: ^8.23.0
+        version: 8.23.0
       pg-logical-replication:
         specifier: ^2.0.0
         version: 2.5.0
@@ -252,8 +252,8 @@ importers:
         version: 0.6.1(@types/node@22.19.21)
     devDependencies:
       mysql2:
-        specifier: ^3.11.5
-        version: 3.22.5(@types/node@22.19.21)
+        specifier: ^3.23.3
+        version: 3.23.3(@types/node@22.20.1)
       tsup:
         specifier: ^8.3.5
         version: 8.5.1(postcss@8.5.15)(typescript@5.9.3)(yaml@2.9.0)
@@ -271,11 +271,11 @@ importers:
         version: link:../core
     devDependencies:
       '@types/pg':
-        specifier: ^8.11.10
-        version: 8.20.0
+        specifier: ^8.21.0
+        version: 8.21.0
       pg:
-        specifier: ^8.22.0
-        version: 8.22.0
+        specifier: ^8.23.0
+        version: 8.23.0
       pg-logical-replication:
         specifier: ^2.0.0
         version: 2.5.0
@@ -1053,8 +1053,11 @@ packages:
   '@types/node@22.19.21':
     resolution: {integrity: sha512-VMeFBSCKQKmm2swI2kW51SFusDqekC6q9trBCvJ/JliDchFSuoYYKN7yVNjPthP1HKZcx3U1gI/wTcEBjEFKTA==}
 
-  '@types/pg@8.20.0':
-    resolution: {integrity: sha512-bEPFOaMAHTEP1EzpvHTbmwR8UsFyHSKsRisLIHVMXnpNefSbGA1bD6CVy+qKjGSqmZqNqBDV2azOBo8TgkcVow==}
+  '@types/node@22.20.1':
+    resolution: {integrity: sha512-EANqOCF9QFyra+4pfxUcX9STKJpCLjMbObVzljIJomAWSnuSIEAvyzEU53GaajbXJEgdh0iEcPL+DGvpUd4k1Q==}
+
+  '@types/pg@8.21.0':
+    resolution: {integrity: sha512-AYdtudzabjLZgVgRZmAnU8bAnVUXzuJX2IYHeSIiIHm68olD+LgQYCGWdtcNYnP0uq9c4S4NibVG3Ni7VbKW7Q==}
 
   '@types/readable-stream@4.0.23':
     resolution: {integrity: sha512-wwXrtQvbMHxCbBgjHaMGEmImFTQxxpfMOR/ZoQnXxB1woqkUbdLGFDgauo00Py9IudiaqSeiBiulSV9i6XIPig==}
@@ -1105,8 +1108,8 @@ packages:
     resolution: {integrity: sha512-803JbPT5sf1Dg6xse5VqoD1ju4S3ST7kJNaPApaFmPcoJSwzx//yM0AO7QaIHp54N+MJlZbZ7cc5ext4zC3o1g==}
     engines: {node: '>= 18.0'}
 
-  '@vlasky/zongji@0.7.1':
-    resolution: {integrity: sha512-LIgDW/GvHk4UZ15f3Bhxc7NqK0X5fdVsHyD4WCjvzA6oMfcB9C5qfr43Lc3QWw4Zld8WpoJ33nJPfYcM35Vx/w==}
+  '@vlasky/zongji@0.9.0':
+    resolution: {integrity: sha512-MF3HiPZLolUdU/jIcRw2qgwYvFQB14xNPCyU/cPMAvVyo4ogxqwpOmdIwdOw8YM0deC6DT/hAKcTlXQs5+sHvQ==}
     engines: {node: '>= 18.0'}
 
   abbrev@3.0.1:
@@ -1414,10 +1417,6 @@ packages:
   define-lazy-prop@3.0.0:
     resolution: {integrity: sha512-N+MeXYoqr3pOgn8xfyRPREN7gHakLYjhsHhWGT3fWAiL4IkAt0iDw14QiiEm2bE30c5XX5q0FtAA3CK5f9/BUg==}
     engines: {node: '>=12'}
-
-  denque@2.1.0:
-    resolution: {integrity: sha512-HVQE3AAb/pxF8fQAoiqpvg9i3evqug3hoiwakOyZAwJm+6vZehbkYXZ0l4JxS+I3QxM97v5aaRNhj8v5oBhekw==}
-    engines: {node: '>=0.10'}
 
   detect-indent@6.1.0:
     resolution: {integrity: sha512-reYkTUJAZb9gUuZ2RvVCNhVHdg62RHnJ7WJl8ftMi4diZ6NWlciOzQN88pUhSELEwflJht4oQDv0F0BMlwaYtA==}
@@ -1840,8 +1839,8 @@ packages:
     engines: {node: '>=18'}
     hasBin: true
 
-  mysql2@3.22.5:
-    resolution: {integrity: sha512-95uZ2TrPWAZdwpB3vvvDbmEMcNG8yIeNCyu6GUcr/QnWEE/wXm7+mhOCsdQfWQDTV7qYT/PDUZ4U4UPP4AsXqQ==}
+  mysql2@3.23.3:
+    resolution: {integrity: sha512-ehp9HEKr4wVJaBOUVxNFa+CNrsCCCZ6363/jbGhb7WpEmSRNIXjHBjFs5K2s2cXn7j/RhDieejsQJ6nfUwD6vQ==}
     engines: {node: '>= 8.0'}
     peerDependencies:
       '@types/node': '>= 8'
@@ -1856,8 +1855,8 @@ packages:
   nan@2.27.0:
     resolution: {integrity: sha512-hC+0LidcL3XE4rp1C4H54KujgXKzbfyTngZTwBByQxsOxCEKZT0MPQ4hOKUH2jU1OYstqdDH4onyHPDzcV0XdQ==}
 
-  nanoid@3.3.15:
-    resolution: {integrity: sha512-y7Wygv/7mEOvxTuEQDB8StXdMRBWf1kR/tlhAzBRUFkB2jfcLOAxO/SHmOO2zgz1pVgK29/kyupn059/bCHdjA==}
+  nanoid@3.3.18:
+    resolution: {integrity: sha512-DTg4MJbGMWkfi6VZFdNt2/caMbQy4Ou+Op/hJQvGEWcnVfoA1QA+xzRKAzw9jD6+GVOOeYr/mIcuDSdug6F6+w==}
     engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
     hasBin: true
 
@@ -1968,18 +1967,15 @@ packages:
     peerDependencies:
       pg: '>=8.0'
 
-  pg-protocol@1.14.0:
-    resolution: {integrity: sha512-n5taZ1kO3s9ngDTVxsEznOqCyToTgz0FLuPq0B33COy5pPpuWJpY3/2oRBVETuOgzdqRXfWpM9HIhp2LBBT1BA==}
-
-  pg-protocol@1.15.0:
-    resolution: {integrity: sha512-cq9sECI5s0+uPUXjbz8ioyPJni6RzsRib0US67i5IoTZKw8fNeYlVE7u8F4dG7vEJJtc5wdD1K189lCCUwqWTQ==}
+  pg-protocol@1.16.0:
+    resolution: {integrity: sha512-sILXutLVjCLjcDuOmvhX5e2Z4cS5qG/6Bu3VkpFwdf/633ElGLpEh9bgmuI5I4sqKqkifQiGyiCcx1HdtrK7tg==}
 
   pg-types@2.2.0:
     resolution: {integrity: sha512-qTAAlrEsl8s4OiEQY69wDvcMIdQN6wdz5ojQiOy6YRMuynxenON0O5oCpJI6lshc6scgAY8qvJ2On/p+CXY0GA==}
     engines: {node: '>=4'}
 
-  pg@8.22.0:
-    resolution: {integrity: sha512-8wih1vVIBMxoUM2oB4soJsD9tDnDpLv4OXBJ+EJzFsvycD+lfyIreC2gGHq78f8jbLLt+bvlPTFdFZfJkOuzAA==}
+  pg@8.23.0:
+    resolution: {integrity: sha512-Ip2EQCngowJLGOfCwkFhPXU7/ljlhn6Rxlmy4XYfL2Y+vyRM59+8uR2xqRWKdYmbXmxCFOAmKxBuSUCdF34qLg==}
     engines: {node: '>= 16.0.0'}
     peerDependencies:
       pg-native: '>=3.0.1'
@@ -2203,8 +2199,8 @@ packages:
   sprintf-js@1.1.3:
     resolution: {integrity: sha512-Oo+0REFV59/rz3gfJNKQiBlwfHaSESl1pcGyABQsnnIfWOFt6JNj5gCog2U6MLZ//IGYD+nA8nI+mTShREReaA==}
 
-  sql-escaper@1.3.3:
-    resolution: {integrity: sha512-BsTCV265VpTp8tm1wyIm1xqQCS+Q9NHx2Sr+WcnUrgLrQ6yiDIvHYJV5gHxsj1lMBy2zm5twLaZao8Jd+S8JJw==}
+  sql-escaper@1.5.1:
+    resolution: {integrity: sha512-4toX5E1fQbBrpfXidaHnF0669nkAdETeIPTs2SUjxxD7RRIs9ICG4gtpmfc68JCEKehsdwLFqBu9VlQqZ1P1gg==}
     engines: {bun: '>=1.0.0', deno: '>=2.0.0', node: '>=12.0.0'}
 
   ssh-remote-port-forward@1.0.4:
@@ -3478,13 +3474,13 @@ snapshots:
 
   '@types/docker-modem@3.0.6':
     dependencies:
-      '@types/node': 22.19.21
+      '@types/node': 22.20.1
       '@types/ssh2': 1.15.5
 
   '@types/dockerode@3.3.47':
     dependencies:
       '@types/docker-modem': 3.0.6
-      '@types/node': 22.19.21
+      '@types/node': 22.20.1
       '@types/ssh2': 1.15.5
 
   '@types/estree@1.0.9': {}
@@ -3519,23 +3515,27 @@ snapshots:
     dependencies:
       undici-types: 6.21.0
 
-  '@types/pg@8.20.0':
+  '@types/node@22.20.1':
     dependencies:
-      '@types/node': 22.19.21
-      pg-protocol: 1.14.0
+      undici-types: 6.21.0
+
+  '@types/pg@8.21.0':
+    dependencies:
+      '@types/node': 22.20.1
+      pg-protocol: 1.16.0
       pg-types: 2.2.0
 
   '@types/readable-stream@4.0.23':
     dependencies:
-      '@types/node': 22.19.21
+      '@types/node': 22.20.1
 
   '@types/ssh2-streams@0.1.13':
     dependencies:
-      '@types/node': 22.19.21
+      '@types/node': 22.20.1
 
   '@types/ssh2@0.5.52':
     dependencies:
-      '@types/node': 22.19.21
+      '@types/node': 22.20.1
       '@types/ssh2-streams': 0.1.13
 
   '@types/ssh2@1.15.5':
@@ -3596,14 +3596,14 @@ snapshots:
     dependencies:
       big-integer: 1.6.52
       iconv-lite: 0.7.2
-      mysql2: 3.22.5(@types/node@22.19.21)
+      mysql2: 3.23.3(@types/node@22.19.21)
     transitivePeerDependencies:
       - '@types/node'
 
-  '@vlasky/zongji@0.7.1(@types/node@22.19.21)':
+  '@vlasky/zongji@0.9.0(@types/node@22.19.21)':
     dependencies:
       iconv-lite: 0.7.2
-      mysql2: 3.22.5(@types/node@22.19.21)
+      mysql2: 3.23.3(@types/node@22.19.21)
     transitivePeerDependencies:
       - '@types/node'
 
@@ -3886,8 +3886,6 @@ snapshots:
       default-browser-id: 5.0.1
 
   define-lazy-prop@3.0.0: {}
-
-  denque@2.1.0: {}
 
   detect-indent@6.1.0: {}
 
@@ -4310,17 +4308,27 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  mysql2@3.22.5(@types/node@22.19.21):
+  mysql2@3.23.3(@types/node@22.19.21):
     dependencies:
       '@types/node': 22.19.21
       aws-ssl-profiles: 1.1.2
-      denque: 2.1.0
       generate-function: 2.3.1
-      iconv-lite: 0.7.2
+      iconv-lite: 0.7.3
       long: 5.3.2
       lru.min: 1.1.4
       named-placeholders: 1.1.6
-      sql-escaper: 1.3.3
+      sql-escaper: 1.5.1
+
+  mysql2@3.23.3(@types/node@22.20.1):
+    dependencies:
+      '@types/node': 22.20.1
+      aws-ssl-profiles: 1.1.2
+      generate-function: 2.3.1
+      iconv-lite: 0.7.3
+      long: 5.3.2
+      lru.min: 1.1.4
+      named-placeholders: 1.1.6
+      sql-escaper: 1.5.1
 
   mz@2.7.0:
     dependencies:
@@ -4334,7 +4342,7 @@ snapshots:
 
   nan@2.27.0: {}
 
-  nanoid@3.3.15: {}
+  nanoid@3.3.18: {}
 
   native-duplexpair@1.0.0: {}
 
@@ -4412,17 +4420,15 @@ snapshots:
   pg-logical-replication@2.5.0:
     dependencies:
       eventemitter2: 6.4.9
-      pg: 8.22.0
+      pg: 8.23.0
     transitivePeerDependencies:
       - pg-native
 
-  pg-pool@3.14.0(pg@8.22.0):
+  pg-pool@3.14.0(pg@8.23.0):
     dependencies:
-      pg: 8.22.0
+      pg: 8.23.0
 
-  pg-protocol@1.14.0: {}
-
-  pg-protocol@1.15.0: {}
+  pg-protocol@1.16.0: {}
 
   pg-types@2.2.0:
     dependencies:
@@ -4432,11 +4438,11 @@ snapshots:
       postgres-date: 1.0.7
       postgres-interval: 1.2.0
 
-  pg@8.22.0:
+  pg@8.23.0:
     dependencies:
       pg-connection-string: 2.14.0
-      pg-pool: 3.14.0(pg@8.22.0)
-      pg-protocol: 1.15.0
+      pg-pool: 3.14.0(pg@8.23.0)
+      pg-protocol: 1.16.0
       pg-types: 2.2.0
       pgpass: 1.0.5
     optionalDependencies:
@@ -4471,7 +4477,7 @@ snapshots:
 
   postcss@8.5.15:
     dependencies:
-      nanoid: 3.3.15
+      nanoid: 3.3.18
       picocolors: 1.1.1
       source-map-js: 1.2.1
 
@@ -4651,7 +4657,7 @@ snapshots:
 
   sprintf-js@1.1.3: {}
 
-  sql-escaper@1.3.3: {}
+  sql-escaper@1.5.1: {}
 
   ssh-remote-port-forward@1.0.4:
     dependencies:
@@ -4771,7 +4777,7 @@ snapshots:
       '@azure/identity': 4.13.1
       '@azure/keyvault-keys': 4.10.2
       '@js-joda/core': 5.7.0
-      '@types/node': 22.19.21
+      '@types/node': 22.20.1
       bl: 6.1.6
       iconv-lite: 0.6.3
       js-md4: 0.3.2
