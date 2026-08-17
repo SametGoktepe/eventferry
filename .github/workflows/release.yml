@@ -33,7 +33,7 @@ jobs:
       #    → publishes the new versions to npm via OIDC Trusted Publishing,
       #    with build provenance. pnpm converts workspace:* to real versions.
       - name: Version packages or publish to npm
-        uses: changesets/action@v1
+        uses: changesets/action@v2
         with:
           version: pnpm changeset version
           publish: pnpm changeset publish
