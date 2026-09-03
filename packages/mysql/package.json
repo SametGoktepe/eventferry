@@ -70,7 +70,7 @@
   },
   "devDependencies": {
     "@eventferry/core": "workspace:*",
-    "mysql2": "^3.11.5",
+    "mysql2": "^3.23.1",
     "tsup": "^8.3.5",
     "typescript": "^5.7.2",
     "vitest": "^3.2.6"
