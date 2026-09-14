@@ -25,7 +25,7 @@
     "@types/pg": "^8.11.10",
     "@vlasky/zongji": "^0.7.1",
     "kafkajs": "^2.2.4",
-    "mssql": "^11.0.1",
+    "mssql": "^11.0.2",
     "mysql2": "^3.11.5",
     "pg": "^8.22.0",
     "pg-logical-replication": "^2.0.0",
